@@ -15,6 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use chrono::prelude::*;
 use dirs;
 use ron;
 use ron::de::Error as RonError;
@@ -35,6 +36,8 @@ use structs::{Task, TaskListing};
 enum Opt {
     #[structopt(name = "new", about = "create a new task")]
     New { description: String },
+    #[structopt(name = "today", about = "view task status for today")]
+    Today,
 }
 
 /// name of file in which task data is stored
@@ -115,15 +118,76 @@ fn main() {
     let mut tasks: TaskListing = init_task_listing();
 
     // Handle manipulation of `TaskListing` according to command line args given
-    tasks = match Opt::from_args() {
+    match Opt::from_args() {
+        // Create a new task
         Opt::New { description } => {
             println!("new task: {}", description);
 
             let new_task = Task::new(description);
             println!("{:?}", new_task);
             tasks.push(new_task);
+        }
+        // Display tasks that need to be done today
+        Opt::Today => {
+            // Calculate some field widths
+            let indent_size = 4;
+            let description_width = ((tasks.task_iter().fold(0, |max, task| {
+                let curr_len = task.details().unwrap().description().chars().count();
+                if max > curr_len {
+                    max
+                } else {
+                    curr_len
+                }
+            }) / indent_size)
+                + 1)
+                * indent_size;
+            let id_width = ((tasks.task_iter().count().to_string().chars().count() / 4) + 1) * 4;
 
-            tasks
+            // Display header
+            println!();
+            println!("Task status for {}", Local::today().format("%F"));
+            println!();
+
+            // Display tasks
+            for (n, task) in tasks.task_iter().enumerate() {
+                // Check box
+                if task.completed_today().is_some() {
+                    print!("{:<4}", "[x]");
+                } else {
+                    print!("{:<4}", "[ ]")
+                }
+
+                // Numeric ID (used for "order" subcommand
+                print!("{:<width$}", n, width = id_width);
+
+                // Description
+                print!(
+                    "{:<width$}",
+                    task.details().unwrap().description(),
+                    width = description_width,
+                );
+
+                // Completion time
+                let timestamp_display: String;
+                if task.completed_today().is_some() {
+                    let datetime = task.completed_today().unwrap();
+                    timestamp_display = format!("{:02}:{:02}", datetime.hour(), datetime.minute());
+                } else {
+                    timestamp_display = "--:--".into();
+                }
+                print!(
+                    "{:<width$}",
+                    timestamp_display,
+                    width = ((timestamp_display.chars().count() / indent_size) + 1) * indent_size
+                );
+
+                // Mark next task to be done
+                if n == 0 {
+                    print!("(next)")
+                }
+
+                println!();
+            }
         }
     };
 
