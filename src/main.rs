@@ -38,8 +38,8 @@ enum Opt {
     New { description: String },
     #[structopt(name = "today", about = "view task status for today")]
     Today,
-    #[structopt(name = "swap", about = "swap order of tasks")]
-    Swap { from: usize, to: usize },
+    #[structopt(name = "move", about = "move a task from some position to another")]
+    Move { from: usize, to: usize },
     #[structopt(name = "done", about = "mark a task as complete for today")]
     Done { index: usize },
 }
@@ -141,7 +141,7 @@ fn main() {
             tasks.list_for_today();
         }
         // Re-order tasks
-        Opt::Swap { from, to } => {
+        Opt::Move { from, to } => {
             // check that the values are in range
             let num_tasks = tasks.task_iter().count();
             let max_index = num_tasks - 1;
@@ -173,7 +173,7 @@ fn main() {
                     );
                     println!();
 
-                    tasks.swap(from, to);
+                    tasks.move_task(from, to);
                 }
             }
 

@@ -56,10 +56,12 @@ impl TaskListing {
         self.all_tasks.iter_mut()
     }
 
-    /// Swap two tasks by index
+    /// Move a task from one index to another. This will cause the element that came after `to` to
+    /// get shifted towards the end (likewise for all subsequent elements)
     // TODO: have this return a Result so that the caller doesn't have to do bounds-checking
-    pub fn swap(&mut self, from: usize, to: usize) {
-        self.all_tasks.swap(from, to);
+    pub fn move_task(&mut self, from: usize, to: usize) {
+        let element_moving = self.all_tasks.remove(from);
+        self.all_tasks.insert(to, element_moving);
     }
 
     /// List all tasks for today (with completion status, times, and note on which task is next)
