@@ -77,6 +77,7 @@ impl TaskListing {
             + 1)
             * indent_size;
         let id_width = ((self.task_iter().count().to_string().chars().count() / 4) + 1) * 4;
+        let mut next_marked = false;
 
         // Display tasks
         for (n, task) in self.task_iter().enumerate() {
@@ -112,8 +113,9 @@ impl TaskListing {
             );
 
             // Mark next task to be done
-            if n == 0 {
-                print!("(next)")
+            if !next_marked && task.completed_today().is_none() {
+                next_marked = true;
+                print!("(next)");
             }
 
             println!();
