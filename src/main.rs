@@ -38,6 +38,8 @@ enum Opt {
     New { description: String },
     #[structopt(name = "today", about = "view task status for today")]
     Today,
+    #[structopt(name = "swap", about = "swap order of tasks")]
+    Swap { from: usize, to: usize },
 }
 
 /// name of file in which task data is stored
@@ -129,64 +131,53 @@ fn main() {
         }
         // Display tasks that need to be done today
         Opt::Today => {
-            // Calculate some field widths
-            let indent_size = 4;
-            let description_width = ((tasks.task_iter().fold(0, |max, task| {
-                let curr_len = task.details().unwrap().description().chars().count();
-                if max > curr_len {
-                    max
-                } else {
-                    curr_len
-                }
-            }) / indent_size)
-                + 1)
-                * indent_size;
-            let id_width = ((tasks.task_iter().count().to_string().chars().count() / 4) + 1) * 4;
-
             // Display header
             println!();
             println!("Task status for {}", Local::today().format("%F"));
             println!();
 
-            // Display tasks
-            for (n, task) in tasks.task_iter().enumerate() {
-                // Check box
-                if task.completed_today().is_some() {
-                    print!("{:<4}", "[x]");
-                } else {
-                    print!("{:<4}", "[ ]")
-                }
+            tasks.list_for_today();
+        }
+        // Re-order tasks
+        Opt::Swap { from, to } => {
+            // check that the values are in range
+            let num_tasks = tasks.task_iter().count();
+            let max_index = num_tasks - 1;
+            let mut error = false;
 
-                // Numeric ID (used for "order" subcommand
-                print!("{:<width$}", n, width = id_width);
-
-                // Description
-                print!(
-                    "{:<width$}",
-                    task.details().unwrap().description(),
-                    width = description_width,
+            if from > max_index || to > max_index {
+                println!(
+                    "error: index out of range, values should be between 0 and {}",
+                    max_index
                 );
-
-                // Completion time
-                let timestamp_display: String;
-                if task.completed_today().is_some() {
-                    let datetime = task.completed_today().unwrap();
-                    timestamp_display = format!("{:02}:{:02}", datetime.hour(), datetime.minute());
+                error = true;
+            } else {
+                if from == to {
+                    println!("error: indexes are the same");
+                    error = true;
                 } else {
-                    timestamp_display = "--:--".into();
-                }
-                print!(
-                    "{:<width$}",
-                    timestamp_display,
-                    width = ((timestamp_display.chars().count() / indent_size) + 1) * indent_size
-                );
+                    // We have valid indexes, perform the swap
+                    println!();
+                    println!(
+                        "Bumping \"{}\" to position {}",
+                        tasks
+                            .task_iter()
+                            .nth(from)
+                            .unwrap()
+                            .details()
+                            .unwrap()
+                            .description(),
+                        to
+                    );
+                    println!();
 
-                // Mark next task to be done
-                if n == 0 {
-                    print!("(next)")
+                    tasks.swap(from, to);
                 }
+            }
 
-                println!();
+            if !error {
+                // display the task listing
+                tasks.list_for_today();
             }
         }
     };
