@@ -48,6 +48,69 @@ impl TaskListing {
     pub fn task_iter(&self) -> std::slice::Iter<Task> {
         self.all_tasks.iter()
     }
+
+    /// Swap two tasks by index
+    pub fn swap(&mut self, from: usize, to: usize) {
+        self.all_tasks.swap(from, to);
+    }
+
+    /// List all tasks for today (with completion status, times, and note on which task is next)
+    pub fn list_for_today(&self) {
+        // Calculate some field widths
+        let indent_size = 4;
+        let description_width = ((self.task_iter().fold(0, |max, task| {
+            let curr_len = task.details().unwrap().description().chars().count();
+            if max > curr_len {
+                max
+            } else {
+                curr_len
+            }
+        }) / indent_size)
+            + 1)
+            * indent_size;
+        let id_width = ((self.task_iter().count().to_string().chars().count() / 4) + 1) * 4;
+
+        // Display tasks
+        for (n, task) in self.task_iter().enumerate() {
+            // Check box
+            if task.completed_today().is_some() {
+                print!("{:<4}", "[x]");
+            } else {
+                print!("{:<4}", "[ ]")
+            }
+
+            // Numeric ID (used for "order" subcommand
+            print!("{:<width$}", n, width = id_width);
+
+            // Description
+            print!(
+                "{:<width$}",
+                task.details().unwrap().description(),
+                width = description_width,
+            );
+
+            // Completion time
+            let timestamp_display: String;
+            if task.completed_today().is_some() {
+                let datetime = task.completed_today().unwrap();
+                timestamp_display = format!("{:02}:{:02}", datetime.hour(), datetime.minute());
+            } else {
+                timestamp_display = "--:--".into();
+            }
+            print!(
+                "{:<width$}",
+                timestamp_display,
+                width = ((timestamp_display.chars().count() / indent_size) + 1) * indent_size
+            );
+
+            // Mark next task to be done
+            if n == 0 {
+                print!("(next)")
+            }
+
+            println!();
+        }
+    }
 }
 
 /// Represents a `Task` being completed on a particular day.
