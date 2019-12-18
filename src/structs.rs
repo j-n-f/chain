@@ -43,6 +43,11 @@ impl TaskListing {
     pub fn push(&mut self, task: Task) {
         self.all_tasks.push(task);
     }
+
+    /// Get an iterator of non-mutable references to `Task` items in the `TaskListing`
+    pub fn task_iter(&self) -> std::slice::Iter<Task> {
+        self.all_tasks.iter()
+    }
 }
 
 /// Represents a `Task` being completed on a particular day.
@@ -74,6 +79,13 @@ pub struct TaskDetails {
     sync_time: Option<u32>, /* time of day */
 }
 
+impl TaskDetails {
+    /// Get a reference to the `description` string for this `Task`
+    pub fn description(&self) -> &String {
+        &self.description
+    }
+}
+
 /// Represents a task. It includes a history of revisions to task details, as well as a list of
 /// dates and times on which the task was completed.
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,10 +111,24 @@ impl Task {
     }
 
     /// Get the current details for this Task
-    // TODO: remove this after using
-    #[allow(dead_code)]
-    fn details(&self) -> Option<&TaskDetails> {
+    pub fn details(&self) -> Option<&TaskDetails> {
         self.detail_history.first()
+    }
+
+    /// Optionally returns a `DateTime<Local>` for when this task was completed today (if it was),
+    /// otherwise `None`
+    pub fn completed_today(&self) -> Option<DateTime<Local>> {
+        let today: Date<Local> = Local::today();
+        for completion in &self.completions {
+            let completion_date_utc: Date<Utc> = completion.datetime.date();
+            let completion_date_local = completion_date_utc.with_timezone(&Local);
+
+            if today == completion_date_local {
+                return Some(completion.datetime.with_timezone(&Local));
+            }
+        }
+
+        None
     }
 
     /// Get the timestamp at which the Task was first created
