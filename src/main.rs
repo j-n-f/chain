@@ -28,7 +28,7 @@ use structopt::StructOpt;
 
 mod structs;
 
-use structs::{Task, TaskListing};
+use structs::{Task, TaskError, TaskListing};
 
 /// Configuration for `structopt`
 #[derive(StructOpt, Debug)]
@@ -40,6 +40,8 @@ enum Opt {
     Today,
     #[structopt(name = "swap", about = "swap order of tasks")]
     Swap { from: usize, to: usize },
+    #[structopt(name = "done", about = "mark a task as complete for today")]
+    Done { index: usize },
 }
 
 /// name of file in which task data is stored
@@ -177,6 +179,55 @@ fn main() {
 
             if !error {
                 // display the task listing
+                tasks.list_for_today();
+            }
+        }
+        // Mark a task as done for the day
+        Opt::Done { index } => {
+            // check that the values are in range
+            let num_tasks = tasks.task_iter().count();
+            let max_index = num_tasks - 1;
+            let mut error = false;
+
+            if index > max_index {
+                error = true;
+                println!(
+                    "error: index out of range, values should be between 0 and {}",
+                    max_index
+                );
+            } else {
+                match tasks.task_iter_mut().nth(index).unwrap().mark_complete() {
+                    Err(e) => {
+                        error = true;
+                        match e {
+                            TaskError::AlreadyCompleted => {
+                                println!("error: task was already completed today");
+                            }
+                            _ => {
+                                println!(
+                                    "error: unknown error occurred while marking task complete"
+                                );
+                            }
+                        }
+                    }
+                    Ok(_) => (),
+                }
+            }
+
+            if !error {
+                println!();
+                println!(
+                    "Completed \"{}\"",
+                    tasks
+                        .task_iter_mut()
+                        .nth(index)
+                        .unwrap()
+                        .details()
+                        .unwrap()
+                        .description()
+                );
+                println!();
+
                 tasks.list_for_today();
             }
         }
