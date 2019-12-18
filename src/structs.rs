@@ -17,6 +17,8 @@
 
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::fmt;
 
 // TODO: break these out into individual files
 
@@ -49,7 +51,13 @@ impl TaskListing {
         self.all_tasks.iter()
     }
 
+    /// Get an iterator of mutable references to `Task` items in the `TaskListing`
+    pub fn task_iter_mut(&mut self) -> std::slice::IterMut<Task> {
+        self.all_tasks.iter_mut()
+    }
+
     /// Swap two tasks by index
+    // TODO: have this return a Result so that the caller doesn't have to do bounds-checking
     pub fn swap(&mut self, from: usize, to: usize) {
         self.all_tasks.swap(from, to);
     }
@@ -120,6 +128,7 @@ pub struct Completion {
     datetime: DateTime<Utc>,
 
     /// User can make an optional remark when marking a task as complete
+    // TODO: a list of these at some particular time should be supported
     remark: Option<String>,
 }
 
@@ -146,6 +155,33 @@ impl TaskDetails {
     /// Get a reference to the `description` string for this `Task`
     pub fn description(&self) -> &String {
         &self.description
+    }
+}
+
+/// Errors for `Task` operations
+#[derive(Debug)]
+pub enum TaskError {
+    /// User tried to complete a task that was already completed for today
+    AlreadyCompleted,
+    /// User tried to do something to a task that didn't exist
+    NotFound,
+}
+
+impl fmt::Display for TaskError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            TaskError::AlreadyCompleted => f.write_str("AlreadyCompleted"),
+            TaskError::NotFound => f.write_str("NotFound"),
+        }
+    }
+}
+
+impl Error for TaskError {
+    fn description(&self) -> &str {
+        match self {
+            TaskError::AlreadyCompleted => "Task was already completed",
+            TaskError::NotFound => "Couldn't find task",
+        }
     }
 }
 
@@ -180,6 +216,8 @@ impl Task {
 
     /// Optionally returns a `DateTime<Local>` for when this task was completed today (if it was),
     /// otherwise `None`
+    // TODO: this should be `completed_today_at`, and another function `completed_today` should
+    // return bool
     pub fn completed_today(&self) -> Option<DateTime<Local>> {
         let today: Date<Local> = Local::today();
         for completion in &self.completions {
@@ -192,6 +230,21 @@ impl Task {
         }
 
         None
+    }
+
+    /// Mark a task as complete for today
+    pub fn mark_complete(&mut self) -> Result<(), TaskError> {
+        if self.completed_today().is_some() {
+            return Err(TaskError::AlreadyCompleted);
+        }
+
+        self.completions.push(Completion {
+            datetime: Utc::now(),
+            // TODO: support remarks
+            remark: None,
+        });
+
+        return Ok(());
     }
 
     /// Get the timestamp at which the Task was first created
