@@ -225,11 +225,13 @@ impl Task {
     pub fn completed_today(&self) -> Option<DateTime<Local>> {
         let today: Date<Local> = Local::today();
         for completion in &self.completions {
-            let completion_date_utc: Date<Utc> = completion.datetime.date();
-            let completion_date_local = completion_date_utc.with_timezone(&Local);
+            // Note to self: if you want to do timezone conversion with chrono, you have to convert
+            // as a DateTime first, then get the dates with .date()
+            let completion_dt_utc: DateTime<Utc> = completion.datetime;
+            let completion_dt_local: DateTime<Local> = completion_dt_utc.with_timezone(&Local);
 
-            if today == completion_date_local {
-                return Some(completion.datetime.with_timezone(&Local));
+            if today == completion_dt_local.date() {
+                return Some(completion_dt_local);
             }
         }
 
