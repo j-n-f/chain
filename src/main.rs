@@ -30,6 +30,25 @@ mod structs;
 
 use structs::{Task, TaskError, TaskListing};
 
+/// This allows parsing date strings into `Opt`
+#[derive(Debug)]
+struct LocalDate {
+    date: Date<Local>,
+}
+
+impl std::str::FromStr for LocalDate {
+    type Err = chrono::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // chrono is complicated
+        let dt: NaiveDate = NaiveDate::parse_from_str(s, "%F").expect("couldn't parse date");
+        let local: Date<Utc> = Date::<Utc>::from_utc(dt, Utc);
+        Ok(LocalDate {
+            date: local.with_timezone(&Local),
+        })
+    }
+}
+
 /// Configuration for `structopt`
 #[derive(StructOpt, Debug)]
 #[structopt(name = "chain", about = "daily task tracking")]
@@ -42,6 +61,8 @@ enum Opt {
     Move { from: usize, to: usize },
     #[structopt(name = "done", about = "mark a task as complete for today")]
     Done { index: usize },
+    #[structopt(name = "history", about = "show history of task completion")]
+    History { start: LocalDate, end: LocalDate },
 }
 
 /// name of file in which task data is stored
@@ -230,6 +251,27 @@ fn main() {
 
                 tasks.list_for_today();
             }
+        }
+        Opt::History { start, end } => {
+            // TODO: bound check, make sure start < end
+            let start = start.date;
+            let end = end.date;
+            let num_days = end.signed_duration_since(start).num_days() + 1;
+            let s_if_plural = if num_days > 1 { "s" } else { "" };
+            let today_if_end_is_today = if end == Local::today() { "(today)" } else { "" };
+
+            println!();
+            println!(
+                "{} day{} of History from {} to {} {}",
+                num_days,
+                s_if_plural,
+                start.format("%F"),
+                end.format("%F"),
+                /* need to lop off timezone */ today_if_end_is_today
+            );
+            println!();
+
+            tasks.history_for_range(start, end);
         }
     };
 

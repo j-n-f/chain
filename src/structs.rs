@@ -78,7 +78,8 @@ impl TaskListing {
         }) / indent_size)
             + 1)
             * indent_size;
-        let id_width = ((self.task_iter().count().to_string().chars().count() / 4) + 1) * 4;
+        let id_width = ((self.task_iter().count().to_string().chars().count() / indent_size) + 1)
+            * indent_size;
         let mut next_marked = false;
 
         // Display tasks
@@ -90,7 +91,7 @@ impl TaskListing {
                 print!("{:<4}", "[ ]")
             }
 
-            // Numeric ID (used for "order" subcommand
+            // Numeric ID (used for "order" subcommand)
             print!("{:<width$}", n, width = id_width);
 
             // Description
@@ -120,6 +121,71 @@ impl TaskListing {
                 print!("(next)");
             }
 
+            println!();
+        }
+    }
+
+    pub fn history_for_range(&self, start: Date<Local>, end: Date<Local>) {
+        // Calculate some field widths
+        let indent_size = 4;
+        let description_width = ((self.task_iter().fold(0, |max, task| {
+            let curr_len = task.details().unwrap().description().chars().count();
+            if max > curr_len {
+                max
+            } else {
+                curr_len
+            }
+        }) / indent_size)
+            + 1)
+            * indent_size;
+        let id_width = ((self.task_iter().count().to_string().chars().count() / indent_size) + 1)
+            * indent_size;
+
+        // Print header row
+        // TODO: break up rendering into multiple rows once this gets to the point that we care
+        // about terminal width
+        print!("{}{}", " ".repeat(id_width), " ".repeat(description_width));
+
+        let mut date_at = start.clone();
+
+        while date_at != end.succ() {
+            print!(
+                "{:<width$}",
+                format!("{:<02}", date_at.day()),
+                width = indent_size
+            );
+
+            date_at = date_at.succ();
+        }
+        println!();
+
+        for (n, task) in self.task_iter().enumerate() {
+            // Numeric ID
+            print!("{:<width$}", n, width = id_width);
+            // Description
+            print!(
+                "{:<width$}",
+                task.details().unwrap().description(),
+                width = description_width
+            );
+
+            // TODO: break the renderer out into a separate module, going to need a state machine
+            // to get the kind of rendering desired
+            date_at = start.clone();
+            while date_at != end.succ() && date_at != Local::today().succ() {
+                if task.completed_on(date_at) {
+                    print!("o   ");
+                } else {
+                    if date_at == Local::today() {
+                        print!("[ ] ");
+                    } else if date_at > Local::today() {
+                        print!("    ");
+                    } else {
+                        print!("x   ")
+                    }
+                }
+                date_at = date_at.succ();
+            }
             println!();
         }
     }
@@ -216,6 +282,20 @@ impl Task {
     /// Get the current details for this Task
     pub fn details(&self) -> Option<&TaskDetails> {
         self.detail_history.first()
+    }
+
+    /// Returns true if completed on the given date
+    pub fn completed_on(&self, date: Date<Local>) -> bool {
+        for completion in &self.completions {
+            let completion_date_utc: Date<Utc> = completion.datetime.date();
+            let completion_date_local = completion_date_utc.with_timezone(&Local);
+
+            if date == completion_date_local {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Optionally returns a `DateTime<Local>` for when this task was completed today (if it was),
