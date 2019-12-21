@@ -144,16 +144,20 @@ impl TaskListing {
         // about terminal width
         print!("{}{}", " ".repeat(id_width), " ".repeat(description_width));
 
+        let mut dates: Vec<Date<Local>> = Vec::new();
         let mut date_at = start.clone();
 
         while date_at != end.succ() {
+            dates.push(date_at);
+            date_at = date_at.succ();
+        }
+
+        for date in dates.iter() {
             print!(
                 "{:<width$}",
-                format!("{:<02}", date_at.day()),
+                format!("{:<02}", date.day()),
                 width = indent_size
             );
-
-            date_at = date_at.succ();
         }
         println!();
 
@@ -169,20 +173,18 @@ impl TaskListing {
 
             // TODO: break the renderer out into a separate module, going to need a state machine
             // to get the kind of rendering desired
-            date_at = start.clone();
-            while date_at != end.succ() && date_at != Local::today().succ() {
-                if task.completed_on(date_at) {
+            for date in dates.iter() {
+                if task.completed_on(*date) {
                     print!("o   ");
                 } else {
-                    if date_at == Local::today() {
+                    if date == &Local::today() {
                         print!("[ ] ");
-                    } else if date_at > Local::today() {
+                    } else if date > &Local::today() {
                         print!("    ");
                     } else {
                         print!("x   ")
                     }
                 }
-                date_at = date_at.succ();
             }
             println!();
         }
