@@ -253,25 +253,34 @@ fn main() {
             }
         }
         Opt::History { start, end } => {
-            // TODO: bound check, make sure start < end
             let start = start.date;
             let end = end.date;
-            let num_days = end.signed_duration_since(start).num_days() + 1;
-            let s_if_plural = if num_days > 1 { "s" } else { "" };
-            let today_if_end_is_today = if end == Local::today() { "(today)" } else { "" };
 
-            println!();
-            println!(
-                "{} day{} of History from {} to {} {}",
-                num_days,
-                s_if_plural,
-                start.format("%F"),
-                end.format("%F"),
-                /* need to lop off timezone */ today_if_end_is_today
-            );
-            println!();
+            let mut error = false;
 
-            tasks.history_for_range(start, end);
+            if start > end {
+                error = true;
+                println!("error: start comes after end");
+            }
+
+            if !error {
+                let num_days = end.signed_duration_since(start).num_days() + 1;
+                let s_if_plural = if num_days > 1 { "s" } else { "" };
+                let today_if_end_is_today = if end == Local::today() { "(today)" } else { "" };
+
+                println!();
+                println!(
+                    "{} day{} of History from {} to {} {}",
+                    num_days,
+                    s_if_plural,
+                    start.format("%F"),
+                    end.format("%F"),
+                    /* need to lop off timezone */ today_if_end_is_today
+                );
+                println!();
+
+                tasks.history_for_range(start, end);
+            }
         }
     };
 
