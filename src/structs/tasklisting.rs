@@ -155,8 +155,8 @@ impl TaskListing {
         for date in dates.iter() {
             print!(
                 "{:<width$}",
-                format!("{:<02}", date.day()),
-                width = indent_size
+                format!("|{:<02}", date.day()),
+                width = indent_size + 1
             );
         }
         println!();
@@ -173,17 +173,34 @@ impl TaskListing {
 
             // TODO: break the renderer out into a separate module, going to need a state machine
             // to get the kind of rendering desired
+            let mut any_done = false;
+            let mut last_complete = false;
             for date in dates.iter() {
-                if task.completed_on(*date) {
-                    print!("o   ");
-                } else {
-                    if date == &Local::today() {
-                        print!("[ ] ");
-                    } else if date > &Local::today() {
-                        print!("    ");
-                    } else {
-                        print!("x   ")
+                print!("|");
+
+                if date <= &Local::today() {
+                    if task.completed_on(*date) {
+                        print!("o");
+                        last_complete = true;
+                        any_done = true;
+                    } else if (date != &Local::today()) && !any_done {
+                        print!(" ");
+                    } else if date == &Local::today() {
+                        print!("?");
+                    } else if any_done && last_complete {
+                        print!("x");
+                        last_complete = false;
                     }
+
+                    if date != dates.last().unwrap() {
+                        if last_complete && (date != &Local::today()) {
+                            print!("-o-");
+                        } else {
+                            print!("   ");
+                        }
+                    }
+                } else {
+                    print!("    ");
                 }
             }
             println!();
