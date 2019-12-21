@@ -117,10 +117,10 @@ impl Task {
     /// Returns true if completed on the given date
     pub fn completed_on(&self, date: Date<Local>) -> bool {
         for completion in &self.completions {
-            let completion_date_utc: Date<Utc> = completion.datetime.date();
-            let completion_date_local = completion_date_utc.with_timezone(&Local);
+            let completion_date_utc: DateTime<Utc> = completion.datetime;
+            let completion_date_local: DateTime<Local> = completion_date_utc.with_timezone(&Local);
 
-            if date == completion_date_local {
+            if date == completion_date_local.date() {
                 return true;
             }
         }
