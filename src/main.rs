@@ -27,6 +27,7 @@ use std::io::prelude::*;
 use structopt::StructOpt;
 
 mod structs;
+mod tui;
 
 use structs::{Task, TaskError, TaskListing};
 
@@ -63,6 +64,8 @@ enum Opt {
     Done { index: usize },
     #[structopt(name = "history", about = "show history of task completion")]
     History { start: LocalDate, end: LocalDate },
+    #[structopt(name = "tui", about = "launch text ui")]
+    Tui,
 }
 
 /// name of file in which task data is stored
@@ -281,6 +284,16 @@ fn main() {
 
                 tasks.history_for_range(start, end);
             }
+        }
+        Opt::Tui => {
+            tui::run(&mut tasks);
+
+            //            let window = initscr();
+            //            window.mvaddstr(1, 0, "Task");
+            //            window.mvaddstr(1, 10, "Date");
+            //            window.refresh();
+            //            window.getch();
+            //            endwin();
         }
     };
 

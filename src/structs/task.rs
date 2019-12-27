@@ -114,6 +114,10 @@ impl Task {
         self.detail_history.first()
     }
 
+    pub fn description(&self) -> &String {
+        self.details().unwrap().description()
+    }
+
     /// Returns true if completed on the given date
     pub fn completed_on(&self, date: Date<Local>) -> bool {
         for completion in &self.completions {
