@@ -63,8 +63,9 @@ pub enum TaskError {
     /// User tried to complete a task that was already completed for today
     AlreadyCompleted,
     /// User tried to do something to a task that didn't exist
-    #[allow(dead_code)]
     NotFound,
+    /// User tried to move a task to an index it's already at
+    RedundantMove,
 }
 
 impl fmt::Display for TaskError {
@@ -72,6 +73,7 @@ impl fmt::Display for TaskError {
         match self {
             TaskError::AlreadyCompleted => f.write_str("AlreadyCompleted"),
             TaskError::NotFound => f.write_str("NotFound"),
+            TaskError::RedundantMove => f.write_str("RedundantMove"),
         }
     }
 }
@@ -81,6 +83,7 @@ impl Error for TaskError {
         match self {
             TaskError::AlreadyCompleted => "Task was already completed",
             TaskError::NotFound => "Couldn't find task",
+            TaskError::RedundantMove => "Can't move task to its own index",
         }
     }
 }
@@ -153,15 +156,14 @@ impl Task {
     }
 
     /// Mark a task as complete for today
-    pub fn mark_complete(&mut self) -> Result<(), TaskError> {
+    pub fn mark_complete(&mut self, remark: Option<String>) -> Result<(), TaskError> {
         if self.completed_today().is_some() {
             return Err(TaskError::AlreadyCompleted);
         }
 
         self.completions.push(Completion {
             datetime: Utc::now(),
-            // TODO: support remarks
-            remark: None,
+            remark,
         });
 
         return Ok(());

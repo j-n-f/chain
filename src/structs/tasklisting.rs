@@ -16,16 +16,22 @@
  */
 
 use chrono::prelude::*;
+use ron::ser::{PrettyConfig, Serializer};
 use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::fs::OpenOptions;
+use std::io::prelude::*;
 
-use super::task::Task;
+use super::Task;
+use super::TaskError;
+use super::TaskOperation;
 
 /// This struct exists so that the RON output used to store tasks between invocations can be
 /// prefixed with the type name when serialized. (it was previously just a vector, but this made it
 /// impossible to output human-readable RON).
 ///
 /// It also represents the user's prioritization of tasks (based on the order they appear in the
-/// vector.
+/// vector)
 #[derive(Serialize, Deserialize)]
 pub struct TaskListing {
     all_tasks: Vec<Task>,
@@ -37,6 +43,59 @@ impl TaskListing {
         TaskListing {
             all_tasks: Vec::new(),
         }
+    }
+
+    /// Handle an operation on the TaskListing. This will only update the listing in memory, it's
+    /// the caller's responsibility to ensure it gets updated in persistent storage.
+    pub fn handle_operation(&mut self, op: TaskOperation) -> Result<(), TaskError> {
+        match op {
+            TaskOperation::Add { description } => {
+                let new_task = Task::new(description.to_string());
+                self.push(new_task);
+            }
+            TaskOperation::MarkComplete { task_index, remark } => {
+                if task_index >= self.all_tasks.iter().count() {
+                    return Err(TaskError::NotFound);
+                }
+
+                let matching_task: &mut Task = self.all_tasks.iter_mut().nth(task_index).unwrap();
+
+                matching_task.mark_complete(remark)?
+            }
+            TaskOperation::Reorder { from, to } => self.move_task(from, to)?,
+        }
+
+        // TODO: write to disk, and reload task listing
+
+        Ok(())
+    }
+
+    /// Serialize listing and write to disk
+    pub fn store(&self, path: std::path::PathBuf) -> Result<(), Box<dyn Error>> {
+        let ron_config = PrettyConfig {
+            ..Default::default()
+        };
+        let mut serializer = Serializer::new(Some(ron_config), true);
+
+        // Run the serializer on our task data, get back a string
+        // TODO: maybe the file should have a checksum so that we can detect corruption from manual
+        // editing
+        match self.serialize(&mut serializer) {
+            Err(e) => match e {
+                ron::ser::Error::Message(s) => panic!("RON serialization error: {}", s),
+            },
+            Ok(_) => {}
+        }
+        let serialized = serializer.into_output_string();
+
+        // Write the serialized data to chain's data folder
+        let mut tasks_file = OpenOptions::new()
+            .write(true)
+            .truncate(true) // truncate, or else the file will be appended to
+            .open(&path)?;
+        tasks_file.write_all(serialized.as_bytes())?;
+
+        Ok(())
     }
 
     /// Push a new `Task` into the `TaskListing`
@@ -56,10 +115,24 @@ impl TaskListing {
 
     /// Move a task from one index to another. This will cause the element that came after `to` to
     /// get shifted towards the end (likewise for all subsequent elements)
-    // TODO: have this return a Result so that the caller doesn't have to do bounds-checking
-    pub fn move_task(&mut self, from: usize, to: usize) {
+    pub fn move_task(&mut self, from: usize, to: usize) -> Result<(), TaskError> {
+        if from >= self.total_tasks() || to >= self.total_tasks() {
+            return Err(TaskError::NotFound);
+        }
+
+        if from == to {
+            return Err(TaskError::RedundantMove);
+        }
+
         let element_moving = self.all_tasks.remove(from);
         self.all_tasks.insert(to, element_moving);
+
+        Ok(())
+    }
+
+    /// Get the total number of tasks in the listing
+    pub fn total_tasks(&self) -> usize {
+        self.task_iter().count()
     }
 
     /// List all tasks for today (with completion status, times, and note on which task is next)

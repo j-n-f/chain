@@ -15,15 +15,23 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use chrono::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::fmt;
-pub mod tasklisting;
-pub use tasklisting::TaskListing;
-
-pub mod taskoperation;
-pub use taskoperation::TaskOperation;
-
-pub mod task;
-pub use task::{Completion as TaskCompletion, Task, TaskDetails, TaskError};
+/// Represents an operation to perform on a TaskListing
+pub enum TaskOperation {
+    Add {
+        /// Description of the task being added
+        description: String,
+    },
+    MarkComplete {
+        /// Index of task to mark complete
+        task_index: usize,
+        /// Optional remark on task completion
+        remark: Option<String>,
+    },
+    Reorder {
+        /// Index of task being moved
+        from: usize,
+        /// Index where `from` will be inserted, moving all tasks at this index and higher to a
+        /// higher index
+        to: usize,
+    },
+}
