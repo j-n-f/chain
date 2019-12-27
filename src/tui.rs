@@ -96,6 +96,8 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     }
     today = today.pred();
 
+    let mut active_task_completed = false;
+
     // Task listing
     // TODO: stop if more tasks than can fit on screen
     // TODO: scrolling
@@ -118,6 +120,10 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
                 }
             }
         };
+
+        if active_task {
+            active_task_completed = active_task && task.completed_today().is_some();
+        }
 
         if description.chars().count() > description_width as usize {
             description_fmt.truncate(description_width as usize - 3);
@@ -156,12 +162,21 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
         }
     }
 
-    // dummy: keyboard hints
+    // Keyboard hints based on currently highlighted task
+    let mut hint_string: Vec<String> = Vec::new();
+    hint_string.push("[n] new task".into());
+    hint_string.push("[r] add remark".into());
+    if !active_task_completed {
+        hint_string.push("[space] complete".into());
+        hint_string.push("[enter] complete with remark".into());
+    }
     ui.window().mvaddstr(
         ui.window().get_max_y() - 2,
         0,
-        "[space] complete - [enter] complete with remark - [r] add remark",
+        " ".repeat(ui.window().get_max_x() as usize),
     );
+    ui.window()
+        .mvaddstr(ui.window().get_max_y() - 2, 0, hint_string.join(" - "));
 }
 
 /// returns `true` for as long as the loop should keep running
