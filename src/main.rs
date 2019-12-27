@@ -19,17 +19,17 @@ use chrono::prelude::*;
 use dirs;
 use ron;
 use ron::de::Error as RonError;
-use serde::Serialize;
 use std::error::Error;
 use std::fs::create_dir;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
+use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod structs;
 mod tui;
 
-use structs::{Task, TaskError, TaskListing};
+use structs::{TaskError, TaskListing, TaskOperation};
 
 /// This allows parsing date strings into `Opt`
 #[derive(Debug)]
@@ -71,14 +71,20 @@ enum Opt {
 /// name of file in which task data is stored
 const TASK_FILE: &'static str = "taskdata.ron";
 
+fn get_tasks_path() -> PathBuf {
+    let mut tasks_path = dirs::data_dir().unwrap();
+    tasks_path.push("chain");
+    tasks_path.push(TASK_FILE);
+
+    tasks_path
+}
+
 /// Ensures that the folder for `TASK_FILE` exists, creates it if it doesn't, and similarly loads
 /// up any existing task data, returning it as a `TaskListing` for the caller. If `TASK_FILE`
 /// doesn't yet exist, it initializes it as an empty file.
 fn init_task_listing() -> TaskListing {
     // Construct a path to the data file used to persist tasks between invocations
-    let mut tasks_path = dirs::data_dir().unwrap();
-    tasks_path.push("chain");
-    tasks_path.push(TASK_FILE);
+    let tasks_path = get_tasks_path();
 
     // TODO: note that the file doesn't initially exist (if so), so that later error handling can
     // know if errors are expected
@@ -145,15 +151,21 @@ fn main() {
     // Initialize the `TaskListing` before parsing command args
     let mut tasks: TaskListing = init_task_listing();
 
+    // We may run a command that indicates a single operation to perform
+    let mut operation: Option<TaskOperation> = None;
+
+    // We may want to show a user the updated task listing after operation is complete
+    let mut list_after = false;
+
     // Handle manipulation of `TaskListing` according to command line args given
     match Opt::from_args() {
         // Create a new task
         Opt::New { description } => {
             println!("new task: {}", description);
 
-            let new_task = Task::new(description);
-            println!("{:?}", new_task);
-            tasks.push(new_task);
+            operation = Some(TaskOperation::Add { description });
+
+            list_after = true;
         }
         // Display tasks that need to be done today
         Opt::Today => {
@@ -162,100 +174,26 @@ fn main() {
             println!("Task status for {}", Local::today().format("%F"));
             println!();
 
-            tasks.list_for_today();
+            list_after = true;
         }
         // Re-order tasks
         Opt::Move { from, to } => {
-            // check that the values are in range
-            let num_tasks = tasks.task_iter().count();
-            let max_index = num_tasks - 1;
-            let mut error = false;
+            operation = Some(TaskOperation::Reorder { from, to });
 
-            if from > max_index || to > max_index {
-                println!(
-                    "error: index out of range, values should be between 0 and {}",
-                    max_index
-                );
-                error = true;
-            } else {
-                if from == to {
-                    println!("error: indexes are the same");
-                    error = true;
-                } else {
-                    // We have valid indexes, perform the swap
-                    println!();
-                    println!(
-                        "Bumping \"{}\" to position {}",
-                        tasks
-                            .task_iter()
-                            .nth(from)
-                            .unwrap()
-                            .details()
-                            .unwrap()
-                            .description(),
-                        to
-                    );
-                    println!();
-
-                    tasks.move_task(from, to);
-                }
-            }
-
-            if !error {
-                // display the task listing
-                tasks.list_for_today();
-            }
+            list_after = true;
         }
         // Mark a task as done for the day
         Opt::Done { index } => {
-            // check that the values are in range
-            let num_tasks = tasks.task_iter().count();
-            let max_index = num_tasks - 1;
-            let mut error = false;
+            operation = Some(TaskOperation::MarkComplete {
+                task_index: index,
+                remark: None,
+            });
 
-            if index > max_index {
-                error = true;
-                println!(
-                    "error: index out of range, values should be between 0 and {}",
-                    max_index
-                );
-            } else {
-                match tasks.task_iter_mut().nth(index).unwrap().mark_complete() {
-                    Err(e) => {
-                        error = true;
-                        match e {
-                            TaskError::AlreadyCompleted => {
-                                println!("error: task was already completed today");
-                            }
-                            _ => {
-                                println!(
-                                    "error: unknown error occurred while marking task complete"
-                                );
-                            }
-                        }
-                    }
-                    Ok(_) => (),
-                }
-            }
-
-            if !error {
-                println!();
-                println!(
-                    "Completed \"{}\"",
-                    tasks
-                        .task_iter_mut()
-                        .nth(index)
-                        .unwrap()
-                        .details()
-                        .unwrap()
-                        .description()
-                );
-                println!();
-
-                tasks.list_for_today();
-            }
+            list_after = true;
         }
         Opt::History { start, end } => {
+            // TODO: this one is an oddball, perhaps each arm should return an enumerated value
+            // describing the report to be shown afterward a command is processed
             let start = start.date;
             let end = end.date;
 
@@ -286,50 +224,33 @@ fn main() {
             }
         }
         Opt::Tui => {
-            tui::run(&mut tasks);
+            // TODO: have this arm run when no argument is provided (i.e. `chain tui` and `chain`
+            // are equivalent)
 
-            //            let window = initscr();
-            //            window.mvaddstr(1, 0, "Task");
-            //            window.mvaddstr(1, 10, "Date");
-            //            window.refresh();
-            //            window.getch();
-            //            endwin();
+            // NOTE: this will run its own loop, and create a stream of TaskOperation which will be
+            // handled by TaskListing internally
+            tui::run(&mut tasks);
         }
     };
 
-    // At this point the `TaskListing` should be in its finalized form
-
-    // Create a serializer (note: it has to be done this way to be able to specify struct_names =
-    // true)
-    let ron_config = ron::ser::PrettyConfig {
-        ..Default::default()
-    };
-    let mut serializer = ron::ser::Serializer::new(Some(ron_config), true);
-
-    // Run the serializer on our task data, get back a string
-    // TODO: maybe the file should have a checksum so that we can detect corruption from manual
-    // editing
-    match tasks.serialize(&mut serializer) {
-        Err(e) => match e {
-            ron::ser::Error::Message(s) => panic!("RON serialization error: {}", s),
-        },
-        Ok(_) => {}
+    // Handle an operation if the command wasn't merely to display information
+    let mut modifications_made: bool = false;
+    if let Some(op) = operation {
+        match tasks.handle_operation(op) {
+            Err(e) => {
+                println!("error: {}", e.description());
+            }
+            Ok(_) => modifications_made = true,
+        }
     }
-    let serialized = serializer.into_output_string();
 
-    // Write the serialized data to chain's data folder
-    let mut tasks_path = data_path;
-    tasks_path.push(TASK_FILE);
-    let mut tasks_file = match OpenOptions::new()
-        .write(true)
-        .truncate(true) // truncate, or else the file will be appended to
-        .open(&tasks_path)
-    {
-        Err(e) => panic!("couldn't open {}: {}", TASK_FILE, e.description()),
-        Ok(file) => file,
-    };
-    match tasks_file.write_all(serialized.as_bytes()) {
-        Err(e) => panic!("couldn't write to {}: {}", TASK_FILE, e.description()),
+    if list_after && modifications_made {
+        tasks.list_for_today();
+    }
+
+    match tasks.store(get_tasks_path()) {
+        Err(e) => println!("\nfailed to store tasks: {}", e.description()),
+        Ok(_) if modifications_made => println!("\ntask database successfully updated"),
         Ok(_) => (),
     }
 
