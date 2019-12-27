@@ -241,8 +241,18 @@ fn main() {
         }
     }
 
-    if list_after && modifications_made {
-        tasks.list_for_today();
+    if list_after {
+        match Opt::from_args() {
+            Opt::Today => {
+                // Always causes listing to be displayed
+                tasks.list_for_today();
+            }
+            Opt::Done { .. } | Opt::Move { .. } | Opt::New { .. } if modifications_made => {
+                // Only display the listing if something changed
+                tasks.list_for_today();
+            }
+            _ => (),
+        }
     }
 
     match tasks.store(structs::tasklisting::get_tasks_path()) {
