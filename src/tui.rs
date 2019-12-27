@@ -22,7 +22,11 @@ use pancurses::{
     Input, Window, A_BOLD, A_REVERSE,
 };
 
+use super::structs::TaskError;
 use super::structs::TaskListing;
+use super::structs::TaskOperation;
+
+use std::error::Error;
 
 enum UiMode {
     Listing {
@@ -181,7 +185,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
 
 /// returns `true` for as long as the loop should keep running
 // TODO: this should yeild an optional operation to apply to the `TaskListing`
-fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> bool {
+fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
     let task_count = tasks.task_iter().count();
     let max_task_index: usize = if task_count > 0 { task_count - 1 } else { 0 };
 
@@ -212,6 +216,9 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> bool {
         A_REVERSE,
         0,
     );
+
+    // We may queue up an operation to perform on the TaskListing
+    let mut task_operation: Option<TaskOperation> = None;
 
     // Handle input
     if let Some(input) = ui.window().getch() {
@@ -245,6 +252,18 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> bool {
                     }
                 }
             },
+            Input::Character(c) => match ui.mode {
+                UiMode::Listing { task_index, .. } => match c {
+                    // Space - mark complete without remark
+                    ' ' => {
+                        task_operation = Some(TaskOperation::MarkComplete {
+                            task_index: task_index.unwrap(),
+                            remark: None,
+                        });
+                    }
+                    _ => (),
+                },
+            },
             Input::Unknown(n) => {
                 ui.window().mvaddstr(10, 0, format!("UK {:?}", n));
             }
@@ -265,7 +284,7 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> bool {
 
     ui.window().refresh();
 
-    true
+    task_operation
 }
 
 pub fn run(tasks: &mut TaskListing) {
@@ -294,7 +313,24 @@ pub fn run(tasks: &mut TaskListing) {
         }
     };
 
-    while input_and_render(&mut ui, tasks) {}
+    while true {
+        let op = input_and_render(&mut ui, tasks);
+
+        if let Some(op) = op {
+            match tasks.handle_and_store(op) {
+                Err(e) => {
+                    // NOTE: most of the time we just want to ignore the error, as the user isn't
+                    // being prompted to complete tasks which are already completed
+                    //ui.window().mvaddstr(
+                    //    ui.window().get_max_y() - 1,
+                    //    0,
+                    //    format!("error: {}", e.description()),
+                    //);
+                }
+                Ok(_) => (),
+            }
+        }
+    }
 
     // Clean up the window and restore terminal state
     endwin();

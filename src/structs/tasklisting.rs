@@ -58,7 +58,7 @@ impl TaskListing {
     }
 
     /// Handle an operation and store the result to disk
-    pub fn handle_and_store(&mut self, op: TaskOperation) -> Result<(), Box<dyn Error>> {
+    pub fn handle_and_store(&mut self, op: TaskOperation) -> Result<(), TaskError> {
         self.handle_operation(op)?;
         self.store(get_tasks_path())?;
 
@@ -92,7 +92,7 @@ impl TaskListing {
     }
 
     /// Serialize listing and write to disk
-    pub fn store(&self, path: std::path::PathBuf) -> Result<(), Box<dyn Error>> {
+    pub fn store(&self, path: std::path::PathBuf) -> Result<(), TaskError> {
         let ron_config = PrettyConfig {
             ..Default::default()
         };
@@ -110,11 +110,19 @@ impl TaskListing {
         let serialized = serializer.into_output_string();
 
         // Write the serialized data to chain's data folder
-        let mut tasks_file = OpenOptions::new()
+        let task_file_open = OpenOptions::new()
             .write(true)
             .truncate(true) // truncate, or else the file will be appended to
-            .open(&path)?;
-        tasks_file.write_all(serialized.as_bytes())?;
+            .open(&path);
+
+        match task_file_open {
+            Err(e) => {
+                return Err(TaskError::StoreFailed);
+            }
+            Ok(mut file) => {
+                file.write_all(serialized.as_bytes());
+            }
+        }
 
         Ok(())
     }
@@ -132,6 +140,15 @@ impl TaskListing {
     /// Get an iterator of mutable references to `Task` items in the `TaskListing`
     pub fn task_iter_mut(&mut self) -> std::slice::IterMut<Task> {
         self.all_tasks.iter_mut()
+    }
+
+    /// Get a reference to a task by index
+    pub fn task_from_index(&mut self, index: usize) -> Option<&mut Task> {
+        if index >= self.total_tasks() {
+            return None;
+        }
+
+        self.all_tasks.iter_mut().nth(index)
     }
 
     /// Move a task from one index to another. This will cause the element that came after `to` to

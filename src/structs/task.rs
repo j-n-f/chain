@@ -66,6 +66,8 @@ pub enum TaskError {
     NotFound,
     /// User tried to move a task to an index it's already at
     RedundantMove,
+    /// Failed to store a TaskListing to disk
+    StoreFailed,
 }
 
 impl fmt::Display for TaskError {
@@ -74,6 +76,7 @@ impl fmt::Display for TaskError {
             TaskError::AlreadyCompleted => f.write_str("AlreadyCompleted"),
             TaskError::NotFound => f.write_str("NotFound"),
             TaskError::RedundantMove => f.write_str("RedundantMove"),
+            TaskError::StoreFailed => f.write_str("StoreFailed"),
         }
     }
 }
@@ -84,6 +87,7 @@ impl Error for TaskError {
             TaskError::AlreadyCompleted => "Task was already completed",
             TaskError::NotFound => "Couldn't find task",
             TaskError::RedundantMove => "Can't move task to its own index",
+            TaskError::StoreFailed => "Can't store task data to disk",
         }
     }
 }
