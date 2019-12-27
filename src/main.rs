@@ -23,13 +23,12 @@ use std::error::Error;
 use std::fs::create_dir;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
-use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod structs;
 mod tui;
 
-use structs::{TaskError, TaskListing, TaskOperation};
+use structs::{TaskListing, TaskOperation};
 
 /// This allows parsing date strings into `Opt`
 #[derive(Debug)]
@@ -68,23 +67,12 @@ enum Opt {
     Tui,
 }
 
-/// name of file in which task data is stored
-const TASK_FILE: &'static str = "taskdata.ron";
-
-fn get_tasks_path() -> PathBuf {
-    let mut tasks_path = dirs::data_dir().unwrap();
-    tasks_path.push("chain");
-    tasks_path.push(TASK_FILE);
-
-    tasks_path
-}
-
 /// Ensures that the folder for `TASK_FILE` exists, creates it if it doesn't, and similarly loads
 /// up any existing task data, returning it as a `TaskListing` for the caller. If `TASK_FILE`
 /// doesn't yet exist, it initializes it as an empty file.
 fn init_task_listing() -> TaskListing {
     // Construct a path to the data file used to persist tasks between invocations
-    let tasks_path = get_tasks_path();
+    let tasks_path = structs::tasklisting::get_tasks_path();
 
     // TODO: note that the file doesn't initially exist (if so), so that later error handling can
     // know if errors are expected
@@ -97,14 +85,23 @@ fn init_task_listing() -> TaskListing {
         .read(true)
         .open(&tasks_path)
     {
-        Err(e) => panic!("couldn't open {}: {}; {:?}", TASK_FILE, e.description(), e),
+        Err(e) => panic!(
+            "couldn't open {}: {}; {:?}",
+            tasks_path.to_str().unwrap(),
+            e.description(),
+            e
+        ),
         Ok(file) => file,
     };
 
     // Load existing tasks data
     let mut tasks_file_string = String::new();
     match tasks_file.read_to_string(&mut tasks_file_string) {
-        Err(e) => panic!("couldn't read {}: {}", TASK_FILE, e.description()),
+        Err(e) => panic!(
+            "couldn't read {}: {}",
+            tasks_path.to_str().unwrap(),
+            e.description()
+        ),
         Ok(_) => (),
     }
 
@@ -248,7 +245,7 @@ fn main() {
         tasks.list_for_today();
     }
 
-    match tasks.store(get_tasks_path()) {
+    match tasks.store(structs::tasklisting::get_tasks_path()) {
         Err(e) => println!("\nfailed to store tasks: {}", e.description()),
         Ok(_) if modifications_made => println!("\ntask database successfully updated"),
         Ok(_) => (),
