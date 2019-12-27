@@ -21,10 +21,22 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
+use std::path::PathBuf;
 
 use super::Task;
 use super::TaskError;
 use super::TaskOperation;
+
+/// name of file in which task data is stored
+const TASK_FILE: &'static str = "taskdata.ron";
+
+pub fn get_tasks_path() -> PathBuf {
+    let mut tasks_path = dirs::data_dir().unwrap();
+    tasks_path.push("chain");
+    tasks_path.push(TASK_FILE);
+
+    tasks_path
+}
 
 /// This struct exists so that the RON output used to store tasks between invocations can be
 /// prefixed with the type name when serialized. (it was previously just a vector, but this made it
@@ -43,6 +55,17 @@ impl TaskListing {
         TaskListing {
             all_tasks: Vec::new(),
         }
+    }
+
+    /// Handle an operation and store the result to disk
+    pub fn handle_and_store(&mut self, op: TaskOperation) -> Result<(), Box<dyn Error>> {
+        self.handle_operation(op)?;
+        self.store(get_tasks_path())?;
+
+        // TODO: reload from disk, as another command from CLI may have modified TaskListing
+        // TODO: maybe there should be some kind of locking mechanism to avoid race conditions
+
+        Ok(())
     }
 
     /// Handle an operation on the TaskListing. This will only update the listing in memory, it's
@@ -64,8 +87,6 @@ impl TaskListing {
             }
             TaskOperation::Reorder { from, to } => self.move_task(from, to)?,
         }
-
-        // TODO: write to disk, and reload task listing
 
         Ok(())
     }
