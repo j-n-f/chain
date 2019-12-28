@@ -172,7 +172,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
                 init_pair(3, COLOR_YELLOW, -1);
                 if is_today {
                     w.mvaddstr((3 + n) as i32, col, "?   ");
-                    w.mvchgat((3 + n) as i32, col, 4, style | A_BLINK, 3);
+                    w.mvchgat((3 + n) as i32, col, 4, style, 3);
                 } else {
                     w.mvaddstr((3 + n) as i32, col, "x   ");
                     w.mvchgat((3 + n) as i32, col, 4, style, 2);
