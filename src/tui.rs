@@ -103,7 +103,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     let cal_width = w.get_max_x() - 0 - (description_width + calendar_pad) as i32;
     let cal_n_days = cal_width / 4;
 
-    let mut today = Utc::now().with_timezone(&Local).date();
+    let mut today: Date<Local> = Utc::now().with_timezone(&Local).date();
     for _n in 0..cal_n_days - 1 {
         today = today.pred();
     }
@@ -129,7 +129,6 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     let mut active_task_completed = false;
 
     // Task listing
-    // TODO: don't show "x" if task didn't exist yet
     if prev_index.is_some() {
         w.mvchgat(
             (3 + prev_index.unwrap() - scroll_pos) as i32,
@@ -184,15 +183,25 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
                 }
                 w.mvchgat((3 + n) as i32, col, 4, style, 1);
             } else {
+                let task_existed = task.existed_on(day);
+
                 init_pair(2, COLOR_RED, -1);
                 init_pair(3, COLOR_YELLOW, -1);
+
+                let mut color_pair = 0;
                 if is_today {
+                    // We don't know if the task will be completed today
                     w.mvaddstr((3 + n) as i32, col, "?   ");
-                    w.mvchgat((3 + n) as i32, col, 4, style, 3);
-                } else {
+                    color_pair = 3;
+                } else if task_existed {
+                    // Not today, task wasn't completed (and it did exist at this point)
                     w.mvaddstr((3 + n) as i32, col, "x   ");
-                    w.mvchgat((3 + n) as i32, col, 4, style, 2);
+                    color_pair = 2;
+                } else {
+                    // Task didn't exist, so it isn't fair to mark it as failed completion
+                    w.mvaddstr((3 + n) as i32, col, "    ");
                 }
+                w.mvchgat((3 + n) as i32, col, 4, style, color_pair);
             }
             day_n += 1;
             day = day.succ();

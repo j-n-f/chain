@@ -125,6 +125,25 @@ impl Task {
         self.details().unwrap().description()
     }
 
+    /// Returns true if task existed on the given date
+    pub fn existed_on(&self, date: Date<Local>) -> bool {
+        let dt_cmp: DateTime<Local> = Local
+            .ymd(date.year(), date.month(), date.day())
+            .and_hms(0, 0, 0);
+
+        let dt_cmp_utc: DateTime<Utc> = dt_cmp.with_timezone(&Utc);
+        let dt_created_utc: DateTime<Utc> = self.created().unwrap();
+
+        let date_cmp_utc: Date<Utc> = dt_cmp_utc.date();
+        let date_created_utc: Date<Utc> = dt_created_utc.date();
+
+        if date_cmp_utc < date_created_utc {
+            return false;
+        }
+
+        true
+    }
+
     /// Returns true if completed on the given date
     pub fn completed_on(&self, date: Date<Local>) -> bool {
         for completion in &self.completions {
@@ -174,9 +193,7 @@ impl Task {
     }
 
     /// Get the timestamp at which the Task was first created
-    // TODO: remove this after using
-    #[allow(dead_code)]
-    fn created(self) -> Option<DateTime<Utc>> {
+    fn created(&self) -> Option<DateTime<Utc>> {
         // Look up the oldest revision for this task, and return its `revised` timestamp
         match self.detail_history.last() {
             Some(details) => Some(details.revised),
