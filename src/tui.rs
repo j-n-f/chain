@@ -123,9 +123,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     }
 
     // Skip some number of elements based on scroll_pos
-    let task_iter = match ui.mode {
-        UiMode::Listing { .. } => tasks.task_iter().skip(scroll_pos),
-    };
+    let task_iter = tasks.task_iter().skip(scroll_pos);
 
     let max_entries_visible = (w.get_max_y() - 5) as usize;
 
