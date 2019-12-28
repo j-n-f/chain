@@ -161,7 +161,11 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
             let is_today = day == today;
             if task.completed_on(day) {
                 init_pair(1, COLOR_GREEN, -1);
-                w.mvaddstr((3 + n) as i32, col, "o---");
+                if is_today {
+                    w.mvaddstr((3 + n) as i32, col, "o");
+                } else {
+                    w.mvaddstr((3 + n) as i32, col, "o---");
+                }
                 w.mvchgat((3 + n) as i32, col, 4, style, 1);
             } else {
                 init_pair(2, COLOR_RED, -1);
