@@ -66,8 +66,27 @@ impl Ui {
 }
 
 fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
-    let description_width = 40;
     let w = ui.window();
+
+    // Calculate description width based on some minimum days of history to be shown
+    let calendar_pad: usize = 2;
+    let min_days_history = 5;
+    let min_days_history_width: usize = 4 * min_days_history;
+    let max_description_width: usize = tasks.task_iter().fold(0, |max, t| {
+        let task_description_width = t.description().chars().count();
+        if task_description_width > max {
+            return task_description_width;
+        }
+        max
+    });
+
+    let description_width = if (w.get_max_x() as usize)
+        < (max_description_width + calendar_pad + min_days_history_width)
+    {
+        w.get_max_x() as usize - (min_days_history_width + calendar_pad)
+    } else {
+        max_description_width
+    };
 
     let (task_index, scroll_pos, prev_index) = match ui.mode {
         UiMode::Listing {
@@ -79,10 +98,9 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
 
     // Header + calendar dates
     w.mvaddstr(2, 0, "Task");
-    w.mvchgat(2, 0, 40, A_BOLD | A_UNDERLINE, 0);
+    w.mvchgat(2, 0, description_width as i32, A_BOLD | A_UNDERLINE, 0);
 
-    let calendar_pad = 2;
-    let cal_width = w.get_max_x() - 0 - (description_width + calendar_pad);
+    let cal_width = w.get_max_x() - 0 - (description_width + calendar_pad) as i32;
     let cal_n_days = cal_width / 4;
 
     let mut today = Utc::now().with_timezone(&Local).date();
@@ -93,7 +111,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     let start = today.clone();
 
     for n in 0..cal_n_days {
-        let col = description_width + calendar_pad + (4 * n);
+        let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * n);
 
         if n == 0 || today.day() == 1 {
             w.mvaddstr(1, col - 1, " ");
@@ -154,7 +172,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
         let mut day = start.clone();
         let mut day_n = 0;
         while day != today.succ() {
-            let col = description_width + calendar_pad + (4 * day_n);
+            let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * day_n);
             let style = if active_task { A_UNDERLINE } else { 0 };
             let is_today = day == today;
             if task.completed_on(day) {
