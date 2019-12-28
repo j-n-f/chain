@@ -69,6 +69,14 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     let description_width = 40;
     let w = ui.window();
 
+    let (task_index, scroll_pos, prev_index) = match ui.mode {
+        UiMode::Listing {
+            task_index,
+            scroll_pos,
+            prev_index,
+        } => (task_index, scroll_pos, prev_index),
+    };
+
     // Header + calendar dates
     w.mvaddstr(2, 0, "Task");
     w.mvchgat(2, 0, 40, A_BOLD | A_UNDERLINE, 0);
@@ -103,27 +111,31 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     let mut active_task_completed = false;
 
     // Task listing
-    // TODO: stop if more tasks than can fit on screen
-    // TODO: scrolling
     // TODO: don't show "x" if task didn't exist yet
-    if let Some(index) = match ui.mode {
-        UiMode::Listing { prev_index, .. } => prev_index,
-    } {
-        w.mvchgat((3 + index) as i32, 0, w.get_max_x(), A_NORMAL, 0);
+    if prev_index.is_some() {
+        w.mvchgat(
+            (3 + prev_index.unwrap() - scroll_pos) as i32,
+            0,
+            w.get_max_x(),
+            A_NORMAL,
+            0,
+        );
     }
-    for (n, task) in tasks.task_iter().enumerate() {
+
+    // Skip some number of elements based on scroll_pos
+    let task_iter = match ui.mode {
+        UiMode::Listing { .. } => tasks.task_iter().skip(scroll_pos),
+    };
+
+    let max_entries_visible = (w.get_max_y() - 5) as usize;
+
+    for (n, task) in task_iter.take(max_entries_visible).enumerate() {
         let description = task.description();
         let mut description_fmt = description.clone();
 
-        let active_task: bool = match ui.mode {
-            UiMode::Listing { task_index, .. } => {
-                if n == task_index.unwrap() {
-                    true
-                } else {
-                    false
-                }
-            }
-        };
+        let n_task = n + scroll_pos;
+
+        let active_task = n_task == task_index.unwrap();
 
         if active_task {
             active_task_completed = active_task && task.completed_today().is_some();
@@ -134,6 +146,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
             description_fmt.push_str("...");
         }
 
+        w.mvaddstr((3 + n) as i32, 0, " ".repeat(description_width as usize));
         w.mvaddstr((3 + n) as i32, 0, description_fmt);
         if active_task {
             w.mvchgat((3 + n) as i32, 0, w.get_max_x(), A_UNDERLINE, 0);
@@ -222,7 +235,6 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
 
     // Handle input
     if let Some(input) = ui.window().getch() {
-        ui.window().mvaddstr(10, 0, " ".repeat(40));
         match input {
             Input::KeyUp => match &mut ui.mode {
                 UiMode::Listing {
@@ -242,7 +254,7 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                 UiMode::Listing {
                     task_index,
                     prev_index,
-                    ..
+                    scroll_pos,
                 } => {
                     if let Some(index) = task_index {
                         if *index < max_task_index {
@@ -275,6 +287,24 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                 //w.mvaddstr(10, 0, format!("{:?}", input));
             }
         };
+    }
+
+    let max_entries_visible = (ui.window().get_max_y() - 5) as usize;
+
+    match &mut ui.mode {
+        UiMode::Listing {
+            task_index,
+            scroll_pos,
+            ..
+        } => {
+            let task_index = task_index.unwrap();
+
+            if task_index < *scroll_pos {
+                *scroll_pos = task_index;
+            } else if task_index >= (scroll_pos.clone() + max_entries_visible) {
+                *scroll_pos = task_index - max_entries_visible + 1;
+            }
+        }
     }
 
     // TODO: show month names A_DIM
