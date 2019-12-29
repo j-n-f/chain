@@ -18,7 +18,6 @@
 use chrono::prelude::*;
 use ron::ser::{PrettyConfig, Serializer};
 use serde::{Deserialize, Serialize};
-use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::path::PathBuf;
@@ -77,15 +76,26 @@ impl TaskListing {
                 self.push(new_task);
             }
             TaskOperation::MarkComplete { task_index, remark } => {
+                // TODO: refactor everything up to "let matching_task" as self.task_from_index()?
                 if task_index >= self.all_tasks.iter().count() {
                     return Err(TaskError::NotFound);
                 }
 
-                let matching_task: &mut Task = self.all_tasks.iter_mut().nth(task_index).unwrap();
+                let matching_task: &mut Task = self.task_iter_mut().nth(task_index).unwrap();
 
                 matching_task.mark_complete(remark)?
             }
             TaskOperation::Reorder { from, to } => self.move_task(from, to)?,
+            TaskOperation::AddRemark { task_index, remark } => {
+                // TODO: refactor everything up to "let matching_task" as self.task_from_index()?
+                if task_index >= self.all_tasks.iter().count() {
+                    return Err(TaskError::NotFound);
+                }
+
+                let matching_task: &mut Task = self.task_iter_mut().nth(task_index).unwrap();
+
+                matching_task.add_remark(remark)?
+            }
         }
 
         Ok(())

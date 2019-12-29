@@ -60,11 +60,16 @@ enum Opt {
     #[structopt(name = "move", about = "move a task from some position to another")]
     Move { from: usize, to: usize },
     #[structopt(name = "done", about = "mark a task as complete for today")]
-    Done { index: usize },
+    Done {
+        index: usize,
+        remark: Option<String>,
+    },
     #[structopt(name = "history", about = "show history of task completion")]
     History { start: LocalDate, end: LocalDate },
     #[structopt(name = "tui", about = "launch text ui")]
     Tui,
+    #[structopt(name = "remark", about = "remark on a task")]
+    Remark { index: usize, remark: String },
 }
 
 /// Ensures that the folder for `TASK_FILE` exists, creates it if it doesn't, and similarly loads
@@ -180,10 +185,10 @@ fn main() {
             list_after = true;
         }
         // Mark a task as done for the day
-        Opt::Done { index } => {
+        Opt::Done { index, remark } => {
             operation = Some(TaskOperation::MarkComplete {
                 task_index: index,
-                remark: None,
+                remark,
             });
 
             list_after = true;
@@ -227,6 +232,12 @@ fn main() {
             // NOTE: this will run its own loop, and create a stream of TaskOperation which will be
             // handled by TaskListing internally
             tui::run(&mut tasks);
+        }
+        Opt::Remark { index, remark } => {
+            operation = Some(TaskOperation::AddRemark {
+                task_index: index,
+                remark,
+            });
         }
     };
 
