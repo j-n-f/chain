@@ -20,15 +20,27 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 
+/// A remark on some task. It's used in two ways:
+///
+/// 1. associated with a `Completion` (this can only be done when completing the task)
+/// 2. associated with the `Task` on some given day
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Remark {
+    /// Timestamp for when remark was made
+    datetime: DateTime<Utc>,
+    /// The remark itself
+    remark: String,
+}
+
 /// Represents a `Task` being completed on a particular day.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Completion {
     /// Date and time at which this completion was recorded
     datetime: DateTime<Utc>,
 
-    /// User can make an optional remark when marking a task as complete
-    // TODO: a list of these at some particular time should be supported
-    remark: Option<String>,
+    /// User can make an optional remark when marking a task as complete, later remarks are closer
+    /// to the end of the list
+    remark: Option<Remark>,
 }
 
 /// Represents the state of a task at some point in time (i.e. the user can change the
@@ -58,6 +70,7 @@ impl TaskDetails {
 }
 
 /// Errors for `Task` operations
+// TODO: this mixes operations on both `Task` and `TaskListing`, and should probably be cleaned up.
 #[derive(Debug)]
 pub enum TaskError {
     /// User tried to complete a task that was already completed for today
@@ -101,6 +114,20 @@ pub struct Task {
 
     /// A record of completions
     completions: Vec<Completion>,
+
+    /// A record of remarks made on tasks
+    #[serde(default = "Vec::new")]
+    remarks: Vec<Remark>,
+}
+
+impl Default for Task {
+    fn default() -> Self {
+        Task {
+            detail_history: Vec::new(),
+            completions: Vec::new(),
+            remarks: Vec::new(),
+        }
+    }
 }
 
 impl Task {
@@ -113,6 +140,7 @@ impl Task {
         Task {
             detail_history,
             completions: Vec::new(),
+            remarks: Vec::new(),
         }
     }
 
@@ -178,15 +206,36 @@ impl Task {
         None
     }
 
+    /// Add a remark to a completed task (note: this isn't associated with a `Completion`)
+    pub fn add_remark(&mut self, remark: String) -> Result<(), TaskError> {
+        self.remarks.push(Remark {
+            datetime: Utc::now(),
+            remark,
+        });
+
+        Ok(())
+    }
+
     /// Mark a task as complete for today
     pub fn mark_complete(&mut self, remark: Option<String>) -> Result<(), TaskError> {
         if self.completed_today().is_some() {
             return Err(TaskError::AlreadyCompleted);
         }
 
+        let now = Utc::now();
+
+        let remark: Option<Remark> = if let Some(remark) = remark {
+            Some(Remark {
+                datetime: now,
+                remark,
+            })
+        } else {
+            None
+        };
+
         self.completions.push(Completion {
-            datetime: Utc::now(),
-            remark,
+            datetime: now,
+            remark: remark,
         });
 
         return Ok(());

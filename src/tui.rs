@@ -22,11 +22,8 @@ use pancurses::{
     Input, Window, A_BOLD, A_REVERSE,
 };
 
-use super::structs::TaskError;
 use super::structs::TaskListing;
 use super::structs::TaskOperation;
-
-use std::error::Error;
 
 enum UiMode {
     Listing {
@@ -372,7 +369,7 @@ pub fn run(tasks: &mut TaskListing) {
         }
     };
 
-    while true {
+    loop {
         let op = input_and_render(&mut ui, tasks);
 
         if let Some(op) = op {

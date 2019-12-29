@@ -15,6 +15,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// TODO: this mixes operations on both `Task` and `TaskListing`, and should probably be cleaned up.
+
 /// Represents an operation to perform on a TaskListing
 pub enum TaskOperation {
     Add {
@@ -26,6 +28,12 @@ pub enum TaskOperation {
         task_index: usize,
         /// Optional remark on task completion
         remark: Option<String>,
+    },
+    AddRemark {
+        /// Index of task to add remark to
+        task_index: usize,
+        /// Remark to add to task
+        remark: String,
     },
     Reorder {
         /// Index of task being moved
