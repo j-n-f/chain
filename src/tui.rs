@@ -25,6 +25,15 @@ use pancurses::{
 use super::structs::TaskListing;
 use super::structs::TaskOperation;
 
+#[derive(Debug)]
+enum ListingNextEntry {
+    /// Completion with remark
+    ForCompletion,
+    /// Remark by itself
+    ForRemark,
+}
+
+#[derive(Debug)]
 enum UiMode {
     Listing {
         /// None if no task is selected (i.e. none exist), otherwise the index into the TaskListing
@@ -35,34 +44,52 @@ enum UiMode {
         prev_index: Option<usize>,
         /// Index of task which is currently at top of listing
         scroll_pos: usize,
+        /// A hint as to how to use the return value from the text entry
+        entry_hint: Option<ListingNextEntry>,
+    },
+    TextEntry {
+        buff: String,
     },
 }
 
 struct Ui {
     window: Option<Window>,
-    mode: UiMode,
-}
-
-impl Default for Ui {
-    fn default() -> Self {
-        Ui {
-            window: None,
-            mode: UiMode::Listing {
-                task_index: None,
-                prev_index: None,
-                scroll_pos: 0,
-            },
-        }
-    }
+    mode_stack: Vec<UiMode>,
+    last_yield: Option<String>,
 }
 
 impl Ui {
     fn window(&self) -> &Window {
         self.window.as_ref().unwrap()
     }
+
+    /// Get a reference to the most recently entered mode
+    fn mode(&self) -> Option<&UiMode> {
+        self.mode_stack.last()
+    }
+
+    /// Get a mutable reference to the most recently entered mode
+    fn mode_mut(&mut self) -> Option<&mut UiMode> {
+        self.mode_stack.last_mut()
+    }
 }
 
-fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
+impl Default for Ui {
+    fn default() -> Self {
+        Ui {
+            window: None,
+            mode_stack: vec![UiMode::Listing {
+                task_index: None,
+                prev_index: None,
+                scroll_pos: 0,
+                entry_hint: None,
+            }],
+            last_yield: None,
+        }
+    }
+}
+
+fn render_listing(ui: &Ui, mode: &UiMode, tasks: &TaskListing) {
     let w = ui.window();
 
     // Calculate description width based on some minimum days of history to be shown
@@ -85,12 +112,14 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
         max_description_width
     };
 
-    let (task_index, scroll_pos, prev_index) = match ui.mode {
+    let (task_index, scroll_pos, prev_index) = match mode {
         UiMode::Listing {
             task_index,
             scroll_pos,
             prev_index,
+            ..
         } => (task_index, scroll_pos, prev_index),
+        _ => (&Some(0 as usize), &(0 as usize), &Some(0 as usize)),
     };
 
     // Header + calendar dates
@@ -137,7 +166,7 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
     }
 
     // Skip some number of elements based on scroll_pos
-    let task_iter = tasks.task_iter().skip(scroll_pos);
+    let task_iter = tasks.task_iter().skip(*scroll_pos);
 
     let max_entries_visible = (w.get_max_y() - 5) as usize;
 
@@ -222,6 +251,21 @@ fn render_listing(ui: &mut Ui, tasks: &TaskListing) {
         .mvaddstr(ui.window().get_max_y() - 2, 0, hint_string.join(" - "));
 }
 
+fn render_entry(ui: &Ui, mode: &UiMode) {
+    match mode {
+        UiMode::TextEntry { buff } => {
+            ui.window().mvaddstr(
+                ui.window().get_max_y() - 1,
+                8,
+                " ".repeat((ui.window().get_max_x() - 8) as usize),
+            );
+            ui.window()
+                .mvaddstr(ui.window().get_max_y() - 1, 0, format!("remark: {}_", buff));
+        }
+        _ => (),
+    }
+}
+
 /// returns `true` for as long as the loop should keep running
 // TODO: this should yeild an optional operation to apply to the `TaskListing`
 fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
@@ -240,10 +284,16 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
         ui.window().get_max_x() - dim_string.chars().count() as i32,
         dim_string,
     );
-    // Mode-specific rendering
-    match ui.mode {
-        UiMode::Listing { .. } => {
-            render_listing(ui, tasks);
+
+    // Render each mode in the stack from earliest to latest
+    for mode in ui.mode_stack.iter() {
+        match mode {
+            UiMode::Listing { .. } => {
+                render_listing(ui, mode, tasks);
+            }
+            UiMode::TextEntry { .. } => {
+                render_entry(ui, mode);
+            }
         }
     }
 
@@ -259,10 +309,15 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
     // We may queue up an operation to perform on the TaskListing
     let mut task_operation: Option<TaskOperation> = None;
 
+    let mut mode_yield: (bool, Option<String>) = (false, None);
+
+    ui.window().refresh();
+
     // Handle input
     if let Some(input) = ui.window().getch() {
+        //ui.window().mvaddstr(1, 0, format!("{:?}          ", input));
         match input {
-            Input::KeyUp => match &mut ui.mode {
+            Input::KeyUp => match ui.mode_mut().unwrap() {
                 UiMode::Listing {
                     task_index,
                     prev_index,
@@ -275,12 +330,13 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                         }
                     }
                 }
+                UiMode::TextEntry { .. } => (),
             },
-            Input::KeyDown => match &mut ui.mode {
+            Input::KeyDown => match ui.mode_mut().unwrap() {
                 UiMode::Listing {
                     task_index,
                     prev_index,
-                    scroll_pos,
+                    ..
                 } => {
                     if let Some(index) = task_index {
                         if *index < max_task_index {
@@ -289,9 +345,14 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                         }
                     }
                 }
+                UiMode::TextEntry { .. } => (),
             },
-            Input::Character(c) => match ui.mode {
-                UiMode::Listing { task_index, .. } => match c {
+            Input::Character(c) => match ui.mode_mut().unwrap() {
+                UiMode::Listing {
+                    task_index,
+                    entry_hint,
+                    ..
+                } => match c {
                     // Space - mark complete without remark
                     ' ' => {
                         task_operation = Some(TaskOperation::MarkComplete {
@@ -299,8 +360,52 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                             remark: None,
                         });
                     }
+                    // Enter - mark complete with remark
+                    '\n' => {
+                        let task = tasks.task_iter().nth(task_index.unwrap()).unwrap();
+
+                        if task.completed_today().is_none() {
+                            *entry_hint = Some(ListingNextEntry::ForCompletion);
+
+                            ui.mode_stack.push(UiMode::TextEntry {
+                                buff: String::new(),
+                            });
+                        }
+                    }
+                    'r' => {
+                        *entry_hint = Some(ListingNextEntry::ForRemark);
+
+                        ui.mode_stack.push(UiMode::TextEntry {
+                            buff: String::new(),
+                        });
+                    }
                     _ => (),
                 },
+                UiMode::TextEntry { buff } => {
+                    match c {
+                        '\n' => {
+                            mode_yield = (true, Some(buff.to_string()));
+                        }
+                        '\x7f' => {
+                            // Backspace
+                            buff.pop();
+                        }
+                        '\x1b' => {
+                            // ESC - i.e. cancel completion with remark
+                            // TODO: note in documentation that user will need to set ESCDELAY to
+                            // make this more responsive (we don't have the set_escdelay function
+                            // in pancurses)
+                            mode_yield = (true, None);
+                        }
+                        _ => {
+                            buff.push(c);
+                        }
+                    }
+                }
+            },
+            Input::KeyEnter => match ui.mode_mut().unwrap() {
+                // TODO: use this once bug in pancurses is fixed
+                _ => (),
             },
             Input::Unknown(n) => {
                 ui.window().mvaddstr(10, 0, format!("UK {:?}", n));
@@ -315,9 +420,57 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
         };
     }
 
+    // hacky way of getting text entry
+    if mode_yield.0 {
+        ui.mode_stack.pop();
+
+        match ui.mode().unwrap() {
+            UiMode::Listing {
+                task_index,
+                entry_hint,
+                ..
+            } => {
+                if let Some(input) = mode_yield.1 {
+                    if let Some(hint_type) = entry_hint {
+                        match hint_type {
+                            ListingNextEntry::ForCompletion => {
+                                task_operation = Some(TaskOperation::MarkComplete {
+                                    task_index: task_index.unwrap(),
+                                    remark: Some(input),
+                                });
+                            }
+                            ListingNextEntry::ForRemark => {
+                                task_operation = Some(TaskOperation::AddRemark {
+                                    task_index: task_index.unwrap(),
+                                    remark: input,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // clear the bottom row
+                ui.window().mvaddstr(
+                    ui.window().get_max_y() - 1,
+                    0,
+                    " ".repeat(ui.window().get_max_x() as usize),
+                );
+            }
+            _ => panic!("unexpected ui mode after text entry"),
+        }
+
+        match ui.mode_mut().unwrap() {
+            UiMode::Listing { entry_hint, .. } => {
+                *entry_hint = None;
+            }
+            _ => (),
+        }
+    }
+
+    // Adjust scroll position based on screen size and task_index
     let max_entries_visible = (ui.window().get_max_y() - 5) as usize;
 
-    match &mut ui.mode {
+    match ui.mode_mut().unwrap() {
         UiMode::Listing {
             task_index,
             scroll_pos,
@@ -331,14 +484,12 @@ fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
                 *scroll_pos = task_index - max_entries_visible + 1;
             }
         }
+        UiMode::TextEntry { .. } => (),
     }
 
     // TODO: show month names A_DIM
     // TODO: display completion time
     // TODO: display (next) [I could just have finished and queued as A_DIM]
-    // TODO: never show a date earlier than the earliest completion in the whole database
-
-    ui.window().refresh();
 
     task_operation
 }
@@ -355,18 +506,20 @@ pub fn run(tasks: &mut TaskListing) {
     set_blink(true);
     curs_set(0);
 
-    ui.mode = if tasks.task_iter().count() > 0 {
-        UiMode::Listing {
+    ui.mode_stack = if tasks.task_iter().count() > 0 {
+        vec![UiMode::Listing {
             task_index: Some(0),
             prev_index: None,
             scroll_pos: 0,
-        }
+            entry_hint: None,
+        }]
     } else {
-        UiMode::Listing {
+        vec![UiMode::Listing {
             task_index: None,
             prev_index: None,
             scroll_pos: 0,
-        }
+            entry_hint: None,
+        }]
     };
 
     loop {
