@@ -159,8 +159,15 @@ fn main() {
     // We may want to show a user the updated task listing after operation is complete
     let mut list_after = false;
 
+    // Default to the `tui` subcommand if none is explicitly specified
+    let subcommand = if std::env::args().count() == 1 {
+        Opt::Tui
+    } else {
+        Opt::from_args()
+    };
+
     // Handle manipulation of `TaskListing` according to command line args given
-    match Opt::from_args() {
+    match subcommand {
         // Create a new task
         Opt::New { description } => {
             println!("new task: {}", description);
