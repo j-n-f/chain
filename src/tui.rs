@@ -17,530 +17,627 @@
 
 use chrono::prelude::*;
 use pancurses::*;
-use pancurses::{
-    curs_set, endwin, init_pair, initscr, noecho, resize_term, start_color, use_default_colors,
-    Input, Window, A_BOLD, A_REVERSE,
-};
 
 use super::structs::TaskListing;
 use super::structs::TaskOperation;
 
-#[derive(Debug)]
-enum ListingNextEntry {
-    /// Completion with remark
-    ForCompletion,
-    /// Remark by itself
-    ForRemark,
+// TODO: in future, we can use std::panic::set_handler()
+macro_rules! tui_panic {
+    () => ({ endwin(); panic!(); });
+    ($fmt:expr) => ({ endwin(); panic!($fmt) });
+    ($fmt:expr, $($arg:tt)*) => ({ endwin(); panic!($fmt, $($arg)*); });
 }
 
-#[derive(Debug)]
-enum UiMode {
-    Listing {
-        /// None if no task is selected (i.e. none exist), otherwise the index into the TaskListing
-        /// for the currently highlighted task
-        task_index: Option<usize>,
-        /// None if no rows need cleaning up, otherwise the index of the row that needs to have
-        /// active task styles reverted
-        prev_index: Option<usize>,
-        /// Index of task which is currently at top of listing
-        scroll_pos: usize,
-        /// A hint as to how to use the return value from the text entry
-        entry_hint: Option<ListingNextEntry>,
-    },
-    TextEntry {
-        buff: String,
-    },
-}
+pub fn new_loop(tasks: &mut TaskListing) {
+    // ncurses window
+    let window = initscr();
 
-struct Ui {
-    window: Option<Window>,
-    mode_stack: Vec<UiMode>,
-    last_yield: Option<String>,
-}
-
-impl Ui {
-    fn window(&self) -> &Window {
-        self.window.as_ref().unwrap()
-    }
-
-    /// Get a reference to the most recently entered mode
-    fn mode(&self) -> Option<&UiMode> {
-        self.mode_stack.last()
-    }
-
-    /// Get a mutable reference to the most recently entered mode
-    fn mode_mut(&mut self) -> Option<&mut UiMode> {
-        self.mode_stack.last_mut()
-    }
-}
-
-impl Default for Ui {
-    fn default() -> Self {
-        Ui {
-            window: None,
-            mode_stack: vec![UiMode::Listing {
-                task_index: None,
-                prev_index: None,
-                scroll_pos: 0,
-                entry_hint: None,
-            }],
-            last_yield: None,
-        }
-    }
-}
-
-fn render_listing(ui: &Ui, mode: &UiMode, tasks: &TaskListing) {
-    let w = ui.window();
-
-    // Calculate description width based on some minimum days of history to be shown
-    let calendar_pad: usize = 2;
-    let min_days_history = 5;
-    let min_days_history_width: usize = 4 * min_days_history;
-    let max_description_width: usize = tasks.task_iter().fold(0, |max, t| {
-        let task_description_width = t.description().chars().count();
-        if task_description_width > max {
-            return task_description_width;
-        }
-        max
-    });
-
-    let description_width = if (w.get_max_x() as usize)
-        < (max_description_width + calendar_pad + min_days_history_width)
-    {
-        w.get_max_x() as usize - (min_days_history_width + calendar_pad)
-    } else {
-        max_description_width
-    };
-
-    let (task_index, scroll_pos, prev_index) = match mode {
-        UiMode::Listing {
-            task_index,
-            scroll_pos,
-            prev_index,
-            ..
-        } => (task_index, scroll_pos, prev_index),
-        _ => (&Some(0 as usize), &(0 as usize), &Some(0 as usize)),
-    };
-
-    // Header + calendar dates
-    w.mvaddstr(2, 0, "Task");
-    w.mvchgat(2, 0, description_width as i32, A_BOLD | A_UNDERLINE, 0);
-
-    let cal_width = w.get_max_x() - 0 - (description_width + calendar_pad) as i32;
-    let cal_n_days = cal_width / 4;
-
-    let mut today: Date<Local> = Utc::now().with_timezone(&Local).date();
-    for _n in 0..cal_n_days - 1 {
-        today = today.pred();
-    }
-
-    let start = today.clone();
-
-    for n in 0..cal_n_days {
-        let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * n);
-
-        if n == 0 || today.day() == 1 {
-            w.mvaddstr(1, col - 1, " ");
-            w.mvaddstr(1, col, format!("{}", today.format("%h")));
-        } else {
-            w.mvaddstr(1, col, "----");
-        }
-
-        w.mvaddstr(2, col, format!("{:<02}", today.day()));
-        w.mvchgat(2, col, 3, A_BOLD, 0);
-        today = today.succ();
-    }
-    today = today.pred();
-
-    let mut active_task_completed = false;
-
-    // Task listing
-    if prev_index.is_some() {
-        w.mvchgat(
-            (3 + prev_index.unwrap() - scroll_pos) as i32,
-            0,
-            w.get_max_x(),
-            A_NORMAL,
-            0,
-        );
-    }
-
-    // Skip some number of elements based on scroll_pos
-    let task_iter = tasks.task_iter().skip(*scroll_pos);
-
-    let max_entries_visible = (w.get_max_y() - 5) as usize;
-
-    for (n, task) in task_iter.take(max_entries_visible).enumerate() {
-        let description = task.description();
-        let mut description_fmt = description.clone();
-
-        let n_task = n + scroll_pos;
-
-        let active_task = n_task == task_index.unwrap();
-
-        if active_task {
-            active_task_completed = active_task && task.completed_today().is_some();
-        }
-
-        if description.chars().count() > description_width as usize {
-            description_fmt.truncate(description_width as usize - 3);
-            description_fmt.push_str("...");
-        }
-
-        w.mvaddstr((3 + n) as i32, 0, " ".repeat(description_width as usize));
-        w.mvaddstr((3 + n) as i32, 0, description_fmt);
-        if active_task {
-            w.mvchgat((3 + n) as i32, 0, w.get_max_x(), A_UNDERLINE, 0);
-        }
-
-        // render completion status
-        let mut day = start.clone();
-        let mut day_n = 0;
-        while day != today.succ() {
-            let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * day_n);
-            let style = if active_task { A_UNDERLINE } else { 0 };
-            let is_today = day == today;
-            if task.completed_on(day) {
-                init_pair(1, COLOR_GREEN, -1);
-                if is_today {
-                    w.mvaddstr((3 + n) as i32, col, "o");
-                } else {
-                    w.mvaddstr((3 + n) as i32, col, "o---");
-                }
-                w.mvchgat((3 + n) as i32, col, 4, style, 1);
-            } else {
-                let task_existed = task.existed_on(day);
-
-                init_pair(2, COLOR_RED, -1);
-                init_pair(3, COLOR_YELLOW, -1);
-
-                let mut color_pair = 0;
-                if is_today {
-                    // We don't know if the task will be completed today
-                    w.mvaddstr((3 + n) as i32, col, "?   ");
-                    color_pair = 3;
-                } else if task_existed {
-                    // Not today, task wasn't completed (and it did exist at this point)
-                    w.mvaddstr((3 + n) as i32, col, "x   ");
-                    color_pair = 2;
-                } else {
-                    // Task didn't exist, so it isn't fair to mark it as failed completion
-                    w.mvaddstr((3 + n) as i32, col, "    ");
-                }
-                w.mvchgat((3 + n) as i32, col, 4, style, color_pair);
-            }
-            day_n += 1;
-            day = day.succ();
-        }
-    }
-
-    // Keyboard hints based on currently highlighted task
-    let mut hint_string: Vec<String> = Vec::new();
-    hint_string.push("[n] new task".into());
-    hint_string.push("[r] add remark".into());
-    if !active_task_completed {
-        hint_string.push("[space] complete".into());
-        hint_string.push("[enter] complete with remark".into());
-    }
-    ui.window().mvaddstr(
-        ui.window().get_max_y() - 2,
-        0,
-        " ".repeat(ui.window().get_max_x() as usize),
-    );
-    ui.window()
-        .mvaddstr(ui.window().get_max_y() - 2, 0, hint_string.join(" - "));
-}
-
-fn render_entry(ui: &Ui, mode: &UiMode) {
-    match mode {
-        UiMode::TextEntry { buff } => {
-            ui.window().mvaddstr(
-                ui.window().get_max_y() - 1,
-                8,
-                " ".repeat((ui.window().get_max_x() - 8) as usize),
-            );
-            ui.window()
-                .mvaddstr(ui.window().get_max_y() - 1, 0, format!("remark: {}_", buff));
-        }
-        _ => (),
-    }
-}
-
-/// returns `true` for as long as the loop should keep running
-// TODO: this should yeild an optional operation to apply to the `TaskListing`
-fn input_and_render(ui: &mut Ui, tasks: &TaskListing) -> Option<TaskOperation> {
-    let task_count = tasks.task_iter().count();
-    let max_task_index: usize = if task_count > 0 { task_count - 1 } else { 0 };
-
-    // Title bar
-    ui.window().mvaddstr(0, 0, "chain (v0.1.0)");
-    ui.window()
-        .mvchgat(0, 0, ui.window().get_max_yx().1, A_UNDERLINE, 0);
-
-    // Debug: window dimensions
-    let dim_string = format!("{} x {}", ui.window().get_max_x(), ui.window().get_max_y());
-    ui.window().mvaddstr(
-        ui.window().get_max_y() - 1,
-        ui.window().get_max_x() - dim_string.chars().count() as i32,
-        dim_string,
-    );
-
-    // Render each mode in the stack from earliest to latest
-    for mode in ui.mode_stack.iter() {
-        match mode {
-            UiMode::Listing { .. } => {
-                render_listing(ui, mode, tasks);
-            }
-            UiMode::TextEntry { .. } => {
-                render_entry(ui, mode);
-            }
-        }
-    }
-
-    // Bottom line is entry bar
-    ui.window().mvchgat(
-        ui.window().get_max_y() - 1,
-        0,
-        ui.window().get_max_x(),
-        A_REVERSE,
-        0,
-    );
-
-    // We may queue up an operation to perform on the TaskListing
-    let mut task_operation: Option<TaskOperation> = None;
-
-    let mut mode_yield: (bool, Option<String>) = (false, None);
-
-    ui.window().refresh();
-
-    // Handle input
-    if let Some(input) = ui.window().getch() {
-        //ui.window().mvaddstr(1, 0, format!("{:?}          ", input));
-        match input {
-            Input::KeyUp => match ui.mode_mut().unwrap() {
-                UiMode::Listing {
-                    task_index,
-                    prev_index,
-                    ..
-                } => {
-                    if let Some(index) = task_index {
-                        if *index > 0 {
-                            *prev_index = Some(*index);
-                            *task_index = Some(*index - 1);
-                        }
-                    }
-                }
-                UiMode::TextEntry { .. } => (),
-            },
-            Input::KeyDown => match ui.mode_mut().unwrap() {
-                UiMode::Listing {
-                    task_index,
-                    prev_index,
-                    ..
-                } => {
-                    if let Some(index) = task_index {
-                        if *index < max_task_index {
-                            *prev_index = Some(*index);
-                            *task_index = Some(*index + 1);
-                        }
-                    }
-                }
-                UiMode::TextEntry { .. } => (),
-            },
-            Input::Character(c) => match ui.mode_mut().unwrap() {
-                UiMode::Listing {
-                    task_index,
-                    entry_hint,
-                    ..
-                } => match c {
-                    // Space - mark complete without remark
-                    ' ' => {
-                        task_operation = Some(TaskOperation::MarkComplete {
-                            task_index: task_index.unwrap(),
-                            remark: None,
-                        });
-                    }
-                    // Enter - mark complete with remark
-                    '\n' => {
-                        let task = tasks.task_iter().nth(task_index.unwrap()).unwrap();
-
-                        if task.completed_today().is_none() {
-                            *entry_hint = Some(ListingNextEntry::ForCompletion);
-
-                            ui.mode_stack.push(UiMode::TextEntry {
-                                buff: String::new(),
-                            });
-                        }
-                    }
-                    'r' => {
-                        *entry_hint = Some(ListingNextEntry::ForRemark);
-
-                        ui.mode_stack.push(UiMode::TextEntry {
-                            buff: String::new(),
-                        });
-                    }
-                    _ => (),
-                },
-                UiMode::TextEntry { buff } => {
-                    match c {
-                        '\n' => {
-                            mode_yield = (true, Some(buff.to_string()));
-                        }
-                        '\x7f' => {
-                            // Backspace
-                            buff.pop();
-                        }
-                        '\x1b' => {
-                            // ESC - i.e. cancel completion with remark
-                            // TODO: note in documentation that user will need to set ESCDELAY to
-                            // make this more responsive (we don't have the set_escdelay function
-                            // in pancurses)
-                            mode_yield = (true, None);
-                        }
-                        _ => {
-                            buff.push(c);
-                        }
-                    }
-                }
-            },
-            Input::KeyEnter => match ui.mode_mut().unwrap() {
-                // TODO: use this once bug in pancurses is fixed
-                _ => (),
-            },
-            Input::Unknown(n) => {
-                ui.window().mvaddstr(10, 0, format!("UK {:?}", n));
-            }
-            Input::KeyResize => {
-                resize_term(0, 0);
-                ui.window().clear();
-            }
-            _ => {
-                //w.mvaddstr(10, 0, format!("{:?}", input));
-            }
-        };
-    }
-
-    // hacky way of getting text entry
-    if mode_yield.0 {
-        ui.mode_stack.pop();
-
-        match ui.mode().unwrap() {
-            UiMode::Listing {
-                task_index,
-                entry_hint,
-                ..
-            } => {
-                if let Some(input) = mode_yield.1 {
-                    if let Some(hint_type) = entry_hint {
-                        match hint_type {
-                            ListingNextEntry::ForCompletion => {
-                                task_operation = Some(TaskOperation::MarkComplete {
-                                    task_index: task_index.unwrap(),
-                                    remark: Some(input),
-                                });
-                            }
-                            ListingNextEntry::ForRemark => {
-                                task_operation = Some(TaskOperation::AddRemark {
-                                    task_index: task_index.unwrap(),
-                                    remark: input,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                // clear the bottom row
-                ui.window().mvaddstr(
-                    ui.window().get_max_y() - 1,
-                    0,
-                    " ".repeat(ui.window().get_max_x() as usize),
-                );
-            }
-            _ => panic!("unexpected ui mode after text entry"),
-        }
-
-        match ui.mode_mut().unwrap() {
-            UiMode::Listing { entry_hint, .. } => {
-                *entry_hint = None;
-            }
-            _ => (),
-        }
-    }
-
-    // Adjust scroll position based on screen size and task_index
-    let max_entries_visible = (ui.window().get_max_y() - 5) as usize;
-
-    match ui.mode_mut().unwrap() {
-        UiMode::Listing {
-            task_index,
-            scroll_pos,
-            ..
-        } => {
-            let task_index = task_index.unwrap();
-
-            if task_index < *scroll_pos {
-                *scroll_pos = task_index;
-            } else if task_index >= (scroll_pos.clone() + max_entries_visible) {
-                *scroll_pos = task_index - max_entries_visible + 1;
-            }
-        }
-        UiMode::TextEntry { .. } => (),
-    }
-
-    // TODO: show month names A_DIM
-    // TODO: display completion time
-    // TODO: display (next) [I could just have finished and queued as A_DIM]
-
-    task_operation
-}
-
-pub fn run(tasks: &mut TaskListing) {
-    // Initialize the window
-    let w = initscr();
+    // store the window in our global Ui object
     let mut ui: Ui = Ui::default();
-    ui.window = Some(w);
+    ui.window = Some(window);
     ui.window().keypad(true); //< makes it so that arrow/function keys are properly represented
+
+    // Some settings for ncurses
     noecho();
     use_default_colors();
     start_color();
     set_blink(true);
     curs_set(0);
 
-    ui.mode_stack = if tasks.task_iter().count() > 0 {
-        vec![UiMode::Listing {
-            task_index: Some(0),
-            prev_index: None,
-            scroll_pos: 0,
-            entry_hint: None,
-        }]
-    } else {
-        vec![UiMode::Listing {
-            task_index: None,
-            prev_index: None,
-            scroll_pos: 0,
-            entry_hint: None,
-        }]
-    };
+    // Keep track of states in the TUI
+    let mut stack: Vec<Box<dyn UiState>> = Vec::new();
 
-    loop {
-        let op = input_and_render(&mut ui, tasks);
+    // Push the initial state
+    stack.push(Box::new(ListingState::new(tasks)));
 
-        if let Some(op) = op {
-            match tasks.handle_and_store(op) {
-                Err(e) => {
-                    // NOTE: most of the time we just want to ignore the error, as the user isn't
-                    // being prompted to complete tasks which are already completed
-                    //ui.window().mvaddstr(
-                    //    ui.window().get_max_y() - 1,
-                    //    0,
-                    //    format!("error: {}", e.description()),
-                    //);
+    // Keep track of any results that come from user actions
+    let mut state_input_results: Vec<StateInputResult> = Vec::new();
+
+    'uiloop: loop {
+        // Handle any results generated by user actions until no more are queued
+        while state_input_results.len() > 0 {
+            let result = state_input_results.pop().unwrap();
+
+            match result {
+                StateInputResult::EnterState(name) => {
+                    // We're being asked to enter another state
+                    match name {
+                        StateName::TextEntry { prompt, reason } => {
+                            // Text entry was requested
+                            stack.push(Box::new(TextEntryState::new(prompt.clone(), reason)));
+                        }
+                    }
                 }
-                Ok(_) => (),
+                StateInputResult::ExitState => {
+                    // We're being asked to exit the current state, so grab whatever output it has
+                    let state_yield: StateYield = stack.last().unwrap().output_on_exit();
+                    let mut yield_value: Option<String> = None;
+                    let mut yield_reason: Option<YieldReason> = None;
+
+                    match state_yield {
+                        StateYield::Exit => {
+                            // Just remove the state and continue
+                            stack.pop();
+                        }
+                        StateYield::ExitWithValue(value, reason) => {
+                            // A value was provided, so pass this along with the reason to the
+                            // initiating state
+                            yield_value = Some(value.unwrap().clone());
+                            yield_reason = Some(reason);
+                            stack.pop();
+                        }
+                        StateYield::QuitProgram => {
+                            // Quit immediately
+                            stack.pop();
+                            break 'uiloop;
+                        }
+                    }
+
+                    // If a value was yielded, pass it on to the current state, and if that yields
+                    // a result, push it for later handling
+                    if let Some(yield_value) = yield_value {
+                        if let Some(yield_value) = stack
+                            .last_mut()
+                            .unwrap()
+                            .handle_yield(yield_value, yield_reason.unwrap())
+                        {
+                            state_input_results.push(yield_value);
+                        }
+                    }
+                }
+                StateInputResult::TaskOperation(op) => {
+                    // We're being asked to manipulate the global `TaskListing`
+                    match tasks.handle_and_store(&op) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            tui_panic!("while attempting operation {:?}, got error {:?}", op, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Render all states
+        for state in &stack {
+            state.render(&ui, tasks);
+        }
+
+        ui.window().refresh();
+
+        // Handle input with the uppermost state
+        if let Some(input) = ui.window().getch() {
+            // TODO: remap character literals to proper input values
+            let input_result: Option<StateInputResult> = match input {
+                Input::KeyResize => {
+                    resize_term(0, 0);
+
+                    // will need to get re-rendered
+                    ui.window().clear();
+
+                    // NOTE: we pass this event to the current state in case it triggers any redraw
+                    // logic in the input handler
+                    // TODO: we probably need to pass resize events to all items in the stack for
+                    // re-rendering
+                    if let Some(top_state) = stack.last_mut() {
+                        // Input may provide a result
+                        top_state.handle_input(
+                            input,
+                            tasks,
+                            ui.window().get_max_y() as usize,
+                            ui.window().get_max_x() as usize,
+                        );
+                    } else {
+                        // There is no state on the stack...
+                        tui_panic!("couldn't find any state!");
+                    }
+
+                    // No StateInputResult for this event
+                    None
+                }
+                _ => {
+                    // Anything that isn't a resize gets passed to the uppermost state's handler
+                    if let Some(top_state) = stack.last_mut() {
+                        // Input may provide a result
+                        top_state.handle_input(
+                            input,
+                            tasks,
+                            ui.window().get_max_y() as usize,
+                            ui.window().get_max_x() as usize,
+                        )
+                    } else {
+                        // There is no state on the stack...
+                        tui_panic!("couldn't find any state!");
+                    }
+                }
+            };
+
+            if let Some(result) = input_result {
+                state_input_results.push(result);
             }
         }
     }
 
-    // Clean up the window and restore terminal state
+    // Terminal is in raw mode, so we call this to restore it to a usable state
     endwin();
+}
+
+/// global UI state
+struct Ui {
+    window: Option<Window>,
+}
+
+impl Ui {
+    /// Get the active window
+    fn window(&self) -> &Window {
+        self.window.as_ref().unwrap()
+    }
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Ui { window: None }
+    }
+}
+
+/// What a state yields upon exiting
+enum StateYield<'a> {
+    /// State exits, no value returned
+    Exit,
+    /// State exits, with a value returned
+    ExitWithValue(Option<&'a String>, YieldReason),
+    /// State exits and program shutdown is requested
+    QuitProgram,
+}
+
+/// The reason that a state yields some value (e.g. from listing state we enter text entry state,
+/// and text entry state passes this back after collecting input so we know why we entered the
+/// text entry state)
+#[derive(Copy, Clone)]
+enum YieldReason {
+    /// user wanted to make a general remark
+    GeneralRemark,
+    /// user wanted to make a remark with task completion
+    CompletionRemark,
+    /// user wanted to enter description for a new task
+    #[allow(dead_code)]
+    NewTask,
+}
+
+/// Used by StateInputResult::EnterState to indicate which state some other state wishes us to
+/// enter (e.g. ListingState wants TextEntryState to get the name of a new task)
+// TODO: rename this something like StateRequested
+enum StateName {
+    TextEntry { prompt: String, reason: YieldReason },
+}
+
+/// When a state receives input, it can return a value of this type to indicate some other action
+/// that should be taken.
+///
+/// Returned by `handle_input()` implementations
+enum StateInputResult {
+    /// Enter another state (e.g. get a remark from `TextEntryState` when the user presses some key
+    /// in the `ListingState`)
+    EnterState(StateName),
+    /// Exit the current state
+    ExitState,
+    /// Perform some TaskOperation
+    TaskOperation(TaskOperation),
+}
+
+/// Each state in the TUI implements this trait.
+trait UiState {
+    /// Render the UI
+    // TODO: maybe have some more generic parameters, like the bounds that the root state has
+    // allocated, and make Ui a type which prevents rendering out of bounds
+    fn render(&self, ui: &Ui, tasks: &TaskListing);
+    /// Handle keyboard input
+    fn handle_input(
+        &mut self,
+        input: pancurses::Input,
+        tasks: &TaskListing,
+        ui_rows: usize,
+        ui_cols: usize,
+    ) -> Option<StateInputResult>;
+    /// Handle another state exiting and yielding some result
+    fn handle_yield(&mut self, yielded: String, reason: YieldReason) -> Option<StateInputResult>;
+    /// Exit from this state, potentially providing some yield
+    fn output_on_exit(&self) -> StateYield;
+}
+
+/// ListingState - initial state which displays available tasks and their completion statuses.
+struct ListingState {
+    /// an index into the global `TaskListing` representing the currently selected task
+    task_index: Option<usize>,
+    /// every time `task_index` is updated, this becomes its previous value
+    prev_index: Option<usize>,
+    /// an index into the global `TaskListing` representing the lowest index displayed in the
+    /// listing (on screen). i.e. increasing this scrolls down the list.
+    scroll_pos: Option<usize>,
+}
+
+impl ListingState {
+    /// Create a new `ListingState`. There should only ever be one of these, and it should always
+    /// be at the bottom of the stack of UI states.
+    fn new(tasks: &TaskListing) -> Self {
+        let n_tasks = tasks.total_tasks();
+        ListingState {
+            task_index: if n_tasks > 0 { Some(0) } else { None },
+            prev_index: if n_tasks > 0 { Some(0) } else { None },
+            scroll_pos: if n_tasks > 0 { Some(0) } else { None },
+        }
+    }
+}
+
+impl UiState for ListingState {
+    fn render(&self, ui: &Ui, tasks: &TaskListing) {
+        let w = ui.window();
+
+        // TODO: this is a hack to make the text entry state clear when finished (i.e. there should
+        // be a way for states to render one more time just before they exit)
+        w.mvaddstr(
+            ui.window().get_max_y() - 1,
+            0,
+            " ".repeat(ui.window().get_max_x() as usize),
+        );
+
+        // Calculate description width based on some minimum days of history to be shown
+        let calendar_pad: usize = 2;
+        let min_days_history = 5;
+        let min_days_history_width: usize = 4 * min_days_history;
+        let max_description_width: usize = tasks.task_iter().fold(0, |max, t| {
+            let task_description_width = t.description().chars().count();
+            if task_description_width > max {
+                return task_description_width;
+            }
+            max
+        });
+
+        let description_width = if (w.get_max_x() as usize)
+            < (max_description_width + calendar_pad + min_days_history_width)
+        {
+            w.get_max_x() as usize - (min_days_history_width + calendar_pad)
+        } else {
+            max_description_width
+        };
+
+        // Header + calendar dates
+        w.mvaddstr(2, 0, "Task");
+        w.mvchgat(2, 0, description_width as i32, A_BOLD | A_UNDERLINE, 0);
+
+        let cal_width = w.get_max_x() - 0 - (description_width + calendar_pad) as i32;
+        let cal_n_days = cal_width / 4;
+
+        let mut today: Date<Local> = Utc::now().with_timezone(&Local).date();
+        for _n in 0..cal_n_days - 1 {
+            today = today.pred();
+        }
+
+        let start = today.clone();
+
+        for n in 0..cal_n_days {
+            let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * n);
+
+            if n == 0 || today.day() == 1 {
+                w.mvaddstr(1, col - 1, " ");
+                w.mvaddstr(1, col, format!("{}", today.format("%h")));
+            } else {
+                w.mvaddstr(1, col, "----");
+            }
+
+            w.mvaddstr(2, col, format!("{:<02}", today.day()));
+            w.mvchgat(2, col, 3, A_BOLD, 0);
+            today = today.succ();
+        }
+        today = today.pred();
+
+        let mut active_task_completed = false;
+
+        // Task listing
+        if self.prev_index.is_some() {
+            w.mvchgat(
+                (3 + self.prev_index.unwrap() - self.scroll_pos.unwrap()) as i32,
+                0,
+                w.get_max_x(),
+                A_NORMAL,
+                0,
+            );
+        }
+
+        // Skip some number of elements based on scroll_pos
+        let task_iter = tasks.task_iter().skip(self.scroll_pos.unwrap_or(0));
+
+        let max_entries_visible = (w.get_max_y() - 5) as usize;
+
+        for (n, task) in task_iter.take(max_entries_visible).enumerate() {
+            let description = task.description();
+            let mut description_fmt = description.clone();
+
+            let n_task = n + self.scroll_pos.unwrap_or(0);
+
+            let active_task = n_task == self.task_index.unwrap();
+
+            if active_task {
+                active_task_completed = active_task && task.completed_today().is_some();
+            }
+
+            if description.chars().count() > description_width as usize {
+                description_fmt.truncate(description_width as usize - 3);
+                description_fmt.push_str("...");
+            }
+
+            w.mvaddstr((3 + n) as i32, 0, " ".repeat(description_width as usize));
+            w.mvaddstr((3 + n) as i32, 0, description_fmt);
+            if active_task {
+                w.mvchgat((3 + n) as i32, 0, w.get_max_x(), A_UNDERLINE, 0);
+            }
+
+            // render completion status
+            let mut day = start.clone();
+            let mut day_n = 0;
+            while day != today.succ() {
+                let col: i32 = description_width as i32 + calendar_pad as i32 + (4 * day_n);
+                let style = if active_task { A_UNDERLINE } else { 0 };
+                let is_today = day == today;
+                if task.completed_on(day) {
+                    init_pair(1, COLOR_GREEN, -1);
+                    if is_today {
+                        w.mvaddstr((3 + n) as i32, col, "o");
+                    } else {
+                        w.mvaddstr((3 + n) as i32, col, "o---");
+                    }
+                    w.mvchgat((3 + n) as i32, col, 4, style, 1);
+                } else {
+                    let task_existed = task.existed_on(day);
+
+                    init_pair(2, COLOR_RED, -1);
+                    init_pair(3, COLOR_YELLOW, -1);
+
+                    let mut color_pair = 0;
+                    if is_today {
+                        // We don't know if the task will be completed today
+                        w.mvaddstr((3 + n) as i32, col, "?   ");
+                        color_pair = 3;
+                    } else if task_existed {
+                        // Not today, task wasn't completed (and it did exist at this point)
+                        w.mvaddstr((3 + n) as i32, col, "x   ");
+                        color_pair = 2;
+                    } else {
+                        // Task didn't exist, so it isn't fair to mark it as failed completion
+                        w.mvaddstr((3 + n) as i32, col, "    ");
+                    }
+                    w.mvchgat((3 + n) as i32, col, 4, style, color_pair);
+                }
+                day_n += 1;
+                day = day.succ();
+            }
+        }
+
+        // Keyboard hints based on currently highlighted task
+        let mut hint_string: Vec<String> = Vec::new();
+        hint_string.push("[n] new task".into());
+        hint_string.push("[r] add remark".into());
+        if !active_task_completed {
+            hint_string.push("[space] complete".into());
+            hint_string.push("[enter] complete with remark".into());
+        }
+        ui.window().mvaddstr(
+            ui.window().get_max_y() - 2,
+            0,
+            " ".repeat(ui.window().get_max_x() as usize),
+        );
+        ui.window()
+            .mvaddstr(ui.window().get_max_y() - 2, 0, hint_string.join(" - "));
+    }
+    fn handle_input(
+        &mut self,
+        input: pancurses::Input,
+        tasks: &TaskListing,
+        ui_rows: usize,
+        _ui_cols: usize,
+    ) -> Option<StateInputResult> {
+        match input {
+            Input::KeyUp => {
+                // decrement `task_index`
+                if let Some(index) = self.task_index {
+                    if index > 0 {
+                        self.prev_index = Some(index);
+                        self.task_index = Some(index - 1);
+                    }
+                }
+            }
+            Input::KeyDown => {
+                // increment `task_index`
+                if let Some(index) = self.task_index {
+                    if index + 1 < tasks.total_tasks() {
+                        self.prev_index = Some(index);
+                        self.task_index = Some(index + 1);
+                    }
+                }
+            }
+            Input::Character(c) => match c {
+                ' ' => {
+                    // space - mark complete without remark
+                    return Some(StateInputResult::TaskOperation(
+                        TaskOperation::MarkComplete {
+                            task_index: self.task_index.unwrap(),
+                            remark: None,
+                        },
+                    ));
+                }
+                '\n' => {
+                    // TODO: move to Input::KeyEnter once pancurses, or the event loop supports the
+                    // conversion
+                    // ---
+                    // enter - mark complete with remark
+                    let selected_task = if let Some(index) = self.task_index {
+                        tasks.task_iter().nth(index)
+                    } else {
+                        None
+                    };
+                    if let Some(task) = selected_task {
+                        if task.completed_today().is_none() {
+                            return Some(StateInputResult::EnterState(StateName::TextEntry {
+                                prompt: "remark: ".into(),
+                                reason: YieldReason::CompletionRemark,
+                            }));
+                        }
+                    }
+                }
+                'r' => {
+                    // r - remark regardless of completion
+                    return Some(StateInputResult::EnterState(StateName::TextEntry {
+                        prompt: "remark: ".into(),
+                        reason: YieldReason::GeneralRemark,
+                    }));
+                }
+                'q' | 'Q' => {
+                    return Some(StateInputResult::ExitState);
+                }
+                _ => (),
+            },
+            _ => (),
+        }
+
+        // handle scrolling
+        // 3 lines taken up at top, 2 at bottom
+        // TODO: handling when no tasks are in the list
+        let max_tasks_visible: usize = (ui_rows - (3 + 2)) as usize;
+        if self.task_index < self.scroll_pos {
+            self.scroll_pos = self.task_index;
+        } else if self.task_index.unwrap() > self.scroll_pos.unwrap() + max_tasks_visible {
+            self.scroll_pos = self.task_index;
+        } else if self.task_index.unwrap() - self.scroll_pos.unwrap() >= max_tasks_visible {
+            self.scroll_pos = Some(self.task_index.unwrap() - max_tasks_visible + 1);
+        }
+
+        None
+    }
+    fn handle_yield(&mut self, yielded: String, reason: YieldReason) -> Option<StateInputResult> {
+        match reason {
+            YieldReason::CompletionRemark => Some(StateInputResult::TaskOperation(
+                TaskOperation::MarkComplete {
+                    task_index: self.task_index.unwrap(),
+                    remark: Some(yielded),
+                },
+            )),
+            YieldReason::GeneralRemark => {
+                Some(StateInputResult::TaskOperation(TaskOperation::AddRemark {
+                    task_index: self.task_index.unwrap(),
+                    remark: yielded,
+                }))
+            }
+            YieldReason::NewTask => {
+                unimplemented!();
+            }
+        }
+    }
+    fn output_on_exit(&self) -> StateYield {
+        // If the user exits the ListingState, they're done using the program
+        StateYield::QuitProgram
+    }
+}
+
+/// TextEntryState - used to get some input from the user (e.g. new task name, remark, etc.)
+struct TextEntryState {
+    /// Displayed before user's input
+    prompt: String,
+    /// Passed back to state which created this one so that it knows what to do with the result of
+    /// this state's execution
+    reason: YieldReason,
+    /// Keep track of user input
+    buff: String,
+}
+
+impl UiState for TextEntryState {
+    fn render(&self, ui: &Ui, _tasks: &TaskListing) {
+        ui.window().mvaddstr(
+            ui.window().get_max_y() - 1,
+            0,
+            format!("{}{}_", self.prompt, self.buff),
+        );
+    }
+    fn handle_input(
+        &mut self,
+        input: pancurses::Input,
+        _tasks: &TaskListing,
+        _ui_rows: usize,
+        _ui_cols: usize,
+    ) -> Option<StateInputResult> {
+        match input {
+            Input::Character(c) => match c {
+                '\n' => {
+                    // TODO: move to Input::KeyEnter once pancurses, or the event loop supports the
+                    // conversion
+                    // ---
+                    // enter - finish text entry
+                    return Some(StateInputResult::ExitState);
+                }
+                '\x7f' => {
+                    // TODO: move to Input::KeyBackspace once pancurses, or the event loop supports
+                    // the conversion
+                    // ---
+                    // Backspace
+                    self.buff.pop();
+                }
+                '\x1b' => {
+                    // TODO: move to Input::KeyEscape once pancurses, or the evnt loop supports the
+                    // conversion
+                    // ---
+                    // Escape
+
+                    // clear the buffer so this state doesn't yield anything
+                    self.buff.clear();
+                    return Some(StateInputResult::ExitState);
+                }
+                _ => {
+                    self.buff.push(c);
+                }
+            },
+            _ => (),
+        }
+
+        None
+    }
+    fn handle_yield(&mut self, _yielded: String, _reason: YieldReason) -> Option<StateInputResult> {
+        // `TextEntryState` will never handle something yielded by another state
+        None
+    }
+    fn output_on_exit(&self) -> StateYield {
+        // We only yeild a value if the buffer has anything in it
+        if self.buff.len() == 0 {
+            StateYield::Exit
+        } else {
+            StateYield::ExitWithValue(Some(&self.buff), self.reason)
+        }
+    }
+}
+
+impl TextEntryState {
+    fn new(prompt: String, reason: YieldReason) -> Self {
+        Self {
+            prompt,
+            buff: String::new(),
+            reason,
+        }
+    }
 }

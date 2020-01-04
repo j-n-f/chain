@@ -57,7 +57,7 @@ impl TaskListing {
     }
 
     /// Handle an operation and store the result to disk
-    pub fn handle_and_store(&mut self, op: TaskOperation) -> Result<(), TaskError> {
+    pub fn handle_and_store(&mut self, op: &TaskOperation) -> Result<(), TaskError> {
         self.handle_operation(op)?;
         self.store(get_tasks_path())?;
 
@@ -69,7 +69,7 @@ impl TaskListing {
 
     /// Handle an operation on the TaskListing. This will only update the listing in memory, it's
     /// the caller's responsibility to ensure it gets updated in persistent storage.
-    pub fn handle_operation(&mut self, op: TaskOperation) -> Result<(), TaskError> {
+    pub fn handle_operation(&mut self, op: &TaskOperation) -> Result<(), TaskError> {
         match op {
             TaskOperation::Add { description } => {
                 let new_task = Task::new(description.to_string());
@@ -77,24 +77,24 @@ impl TaskListing {
             }
             TaskOperation::MarkComplete { task_index, remark } => {
                 // TODO: refactor everything up to "let matching_task" as self.task_from_index()?
-                if task_index >= self.all_tasks.iter().count() {
+                if *task_index >= self.all_tasks.iter().count() {
                     return Err(TaskError::NotFound);
                 }
 
-                let matching_task: &mut Task = self.task_iter_mut().nth(task_index).unwrap();
+                let matching_task: &mut Task = self.task_iter_mut().nth(*task_index).unwrap();
 
                 matching_task.mark_complete(remark)?
             }
-            TaskOperation::Reorder { from, to } => self.move_task(from, to)?,
+            TaskOperation::Reorder { from, to } => self.move_task(*from, *to)?,
             TaskOperation::AddRemark { task_index, remark } => {
                 // TODO: refactor everything up to "let matching_task" as self.task_from_index()?
-                if task_index >= self.all_tasks.iter().count() {
+                if *task_index >= self.all_tasks.iter().count() {
                     return Err(TaskError::NotFound);
                 }
 
-                let matching_task: &mut Task = self.task_iter_mut().nth(task_index).unwrap();
+                let matching_task: &mut Task = self.task_iter_mut().nth(*task_index).unwrap();
 
-                matching_task.add_remark(remark)?
+                matching_task.add_remark(remark.to_string())?
             }
         }
 
@@ -126,15 +126,14 @@ impl TaskListing {
             .open(&path);
 
         match task_file_open {
-            Err(e) => {
+            Err(_e) => {
                 return Err(TaskError::StoreFailed);
             }
-            Ok(mut file) => {
-                file.write_all(serialized.as_bytes());
-            }
+            Ok(mut file) => match file.write_all(serialized.as_bytes()) {
+                Ok(_) => return Ok(()),
+                Err(_e) => return Err(TaskError::StoreFailed),
+            },
         }
-
-        Ok(())
     }
 
     /// Push a new `Task` into the `TaskListing`
@@ -153,6 +152,7 @@ impl TaskListing {
     }
 
     /// Get a reference to a task by index
+    #[allow(dead_code)]
     pub fn task_from_index(&mut self, index: usize) -> Option<&mut Task> {
         if index >= self.total_tasks() {
             return None;

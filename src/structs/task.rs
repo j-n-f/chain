@@ -217,7 +217,7 @@ impl Task {
     }
 
     /// Mark a task as complete for today
-    pub fn mark_complete(&mut self, remark: Option<String>) -> Result<(), TaskError> {
+    pub fn mark_complete(&mut self, remark: &Option<String>) -> Result<(), TaskError> {
         if self.completed_today().is_some() {
             return Err(TaskError::AlreadyCompleted);
         }
@@ -227,7 +227,7 @@ impl Task {
         let remark: Option<Remark> = if let Some(remark) = remark {
             Some(Remark {
                 datetime: now,
-                remark,
+                remark: remark.to_string(),
             })
         } else {
             None

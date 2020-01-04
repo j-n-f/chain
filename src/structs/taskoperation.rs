@@ -18,6 +18,7 @@
 // TODO: this mixes operations on both `Task` and `TaskListing`, and should probably be cleaned up.
 
 /// Represents an operation to perform on a TaskListing
+#[derive(Debug)]
 pub enum TaskOperation {
     Add {
         /// Description of the task being added

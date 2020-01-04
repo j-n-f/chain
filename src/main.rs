@@ -200,6 +200,7 @@ fn main() {
 
             list_after = true;
         }
+        // Display a history of task completion within some date range
         Opt::History { start, end } => {
             // TODO: this one is an oddball, perhaps each arm should return an enumerated value
             // describing the report to be shown afterward a command is processed
@@ -232,14 +233,13 @@ fn main() {
                 tasks.history_for_range(start, end);
             }
         }
+        // Display an interactive TUI
         Opt::Tui => {
-            // TODO: have this arm run when no argument is provided (i.e. `chain tui` and `chain`
-            // are equivalent)
-
             // NOTE: this will run its own loop, and create a stream of TaskOperation which will be
             // handled by TaskListing internally
-            tui::run(&mut tasks);
+            tui::new_loop(&mut tasks);
         }
+        // Add a remark to a task
         Opt::Remark { index, remark } => {
             operation = Some(TaskOperation::AddRemark {
                 task_index: index,
@@ -251,7 +251,7 @@ fn main() {
     // Handle an operation if the command wasn't merely to display information
     let mut modifications_made: bool = false;
     if let Some(op) = operation {
-        match tasks.handle_operation(op) {
+        match tasks.handle_operation(&op) {
             Err(e) => {
                 println!("error: {}", e.description());
             }
