@@ -18,6 +18,7 @@
 use chrono::prelude::*;
 use pancurses::*;
 
+use super::structs::TaskError;
 use super::structs::TaskListing;
 use super::structs::TaskOperation;
 
@@ -109,9 +110,19 @@ pub fn new_loop(tasks: &mut TaskListing) {
                     // We're being asked to manipulate the global `TaskListing`
                     match tasks.handle_and_store(&op) {
                         Ok(_) => (),
-                        Err(e) => {
-                            tui_panic!("while attempting operation {:?}, got error {:?}", op, e);
-                        }
+                        Err(e) => match op {
+                            TaskOperation::MarkComplete { .. } => match e {
+                                TaskError::AlreadyCompleted { .. } => (),
+                                _ => tui_panic!(
+                                    "while attempting operation {:?}, got error {:?}",
+                                    op,
+                                    e
+                                ),
+                            },
+                            _ => {
+                                tui_panic!("while attempting operation {:?}, got error {:?}", op, e)
+                            }
+                        },
                     }
                 }
             }
