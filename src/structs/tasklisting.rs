@@ -71,6 +71,9 @@ impl TaskListing {
     /// the caller's responsibility to ensure it gets updated in persistent storage.
     pub fn handle_operation(&mut self, op: &TaskOperation) -> Result<(), TaskError> {
         match op {
+            TaskOperation::Add { description } if description.chars().count() == 0 => {
+                return Err(TaskError::MissingDescription);
+            }
             TaskOperation::Add { description } => {
                 let new_task = Task::new(description.to_string());
                 self.push(new_task);

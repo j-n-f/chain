@@ -71,8 +71,10 @@ impl TaskDetails {
 
 /// Errors for `Task` operations
 // TODO: this mixes operations on both `Task` and `TaskListing`, and should probably be cleaned up.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TaskError {
+    /// A task being created had no description
+    MissingDescription,
     /// User tried to complete a task that was already completed for today
     AlreadyCompleted,
     /// User tried to do something to a task that didn't exist
@@ -86,6 +88,7 @@ pub enum TaskError {
 impl fmt::Display for TaskError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            TaskError::MissingDescription => f.write_str("MissingDescription"),
             TaskError::AlreadyCompleted => f.write_str("AlreadyCompleted"),
             TaskError::NotFound => f.write_str("NotFound"),
             TaskError::RedundantMove => f.write_str("RedundantMove"),
@@ -97,6 +100,7 @@ impl fmt::Display for TaskError {
 impl Error for TaskError {
     fn description(&self) -> &str {
         match self {
+            TaskError::MissingDescription => "Task had no description",
             TaskError::AlreadyCompleted => "Task was already completed",
             TaskError::NotFound => "Couldn't find task",
             TaskError::RedundantMove => "Can't move task to its own index",
