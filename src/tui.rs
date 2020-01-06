@@ -524,6 +524,13 @@ impl UiState for ListingState {
                 'q' | 'Q' => {
                     return Some(StateInputResult::ExitState);
                 }
+                'n' => {
+                    // n - create a new task
+                    return Some(StateInputResult::EnterState(StateName::TextEntry {
+                        prompt: "new task description: ".into(),
+                        reason: YieldReason::NewTask,
+                    }));
+                }
                 _ => (),
             },
             _ => (),
@@ -557,9 +564,9 @@ impl UiState for ListingState {
                     remark: yielded,
                 }))
             }
-            YieldReason::NewTask => {
-                unimplemented!();
-            }
+            YieldReason::NewTask => Some(StateInputResult::TaskOperation(TaskOperation::Add {
+                description: yielded,
+            })),
         }
     }
     fn output_on_exit(&self) -> StateYield {
