@@ -44,3 +44,233 @@ pub enum TaskOperation {
         to: usize,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TaskOperation;
+    use crate::structs::TaskError;
+    use crate::structs::TaskListing;
+
+    #[test]
+    fn add_requires_description() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "".into(),
+        };
+
+        let result = list.handle_operation(&add);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::MissingDescription);
+    }
+
+    #[test]
+    fn adds_with_description() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "non-zero length".into(),
+        };
+
+        let result = list.handle_operation(&add);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn reorder_no_tasks() {
+        let mut list = TaskListing::new();
+
+        let reorder = TaskOperation::Reorder { from: 0, to: 0 };
+
+        let result = list.handle_operation(&reorder);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+    }
+
+    #[test]
+    fn reorder_same_indexes() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let reorder = TaskOperation::Reorder { from: 0, to: 0 };
+
+        let result = list.handle_operation(&reorder);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::RedundantMove);
+    }
+
+    #[test]
+    fn reorder_same_indexes_no_tasks() {
+        let mut list = TaskListing::new();
+
+        let reorder = TaskOperation::Reorder { from: 0, to: 0 };
+
+        let result = list.handle_operation(&reorder);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+    }
+
+    #[test]
+    fn reorder_out_of_bounds() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let reorder = TaskOperation::Reorder { from: 0, to: 100 };
+
+        let result = list.handle_operation(&reorder);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+    }
+
+    #[test]
+    fn mark_complete_oob() {
+        // Both with and without a remark
+        let mut list = TaskListing::new();
+
+        // No Remark
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: None,
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+
+        // With a remark
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: Some("with a remark".into()),
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+    }
+
+    #[test]
+    fn mark_complete_no_remark() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: None,
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn mark_complete_with_remark() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: Some("with some remark".into()),
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn mark_complete_twice() {
+        // NOTE: this test could potentially fail if the two commands to mark the task complete
+        // happen on opposite sides of the "midnight" boundary. Unlikely, but possible.
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: Some("with some remark".into()),
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_ok());
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::AlreadyCompleted);
+    }
+
+    #[test]
+    fn remark_oob() {
+        let mut list = TaskListing::new();
+
+        let remark = TaskOperation::AddRemark {
+            task_index: 0,
+            remark: "with some remark".into(),
+        };
+
+        let result = list.handle_operation(&remark);
+        assert!(result.is_err());
+        assert!(result.unwrap_err() == TaskError::NotFound);
+    }
+
+    #[test]
+    fn remark_on_incomplete() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let remark = TaskOperation::AddRemark {
+            task_index: 0,
+            remark: "with some remark".into(),
+        };
+
+        let result = list.handle_operation(&remark);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn remark_on_completed() {
+        let mut list = TaskListing::new();
+
+        let add = TaskOperation::Add {
+            description: "first".into(),
+        };
+        assert!(list.handle_operation(&add).is_ok());
+
+        let complete = TaskOperation::MarkComplete {
+            task_index: 0,
+            remark: Some("with some remark".into()),
+        };
+
+        let result = list.handle_operation(&complete);
+        assert!(result.is_ok());
+
+        let remark = TaskOperation::AddRemark {
+            task_index: 0,
+            remark: "with another remark".into(),
+        };
+
+        let result = list.handle_operation(&remark);
+        assert!(result.is_ok());
+    }
+}
