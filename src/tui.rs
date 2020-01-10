@@ -108,8 +108,18 @@ pub fn new_loop(tasks: &mut TaskListing) {
                 }
                 StateInputResult::TaskOperation(op) => {
                     // We're being asked to manipulate the global `TaskListing`
-                    match tasks.handle_and_store(&op) {
-                        Ok(_) => (),
+                    let old_tasks = tasks.clone();
+                    match &tasks.handle_and_store(&op) {
+                        Ok(_) => {
+                            for state in &mut stack {
+                                state.on_tasklist_update(
+                                    &old_tasks,
+                                    &tasks,
+                                    ui.window().get_max_y() as usize,
+                                    ui.window().get_max_x() as usize,
+                                );
+                            }
+                        }
                         Err(e) => match op {
                             TaskOperation::MarkComplete { .. } => match e {
                                 TaskError::AlreadyCompleted { .. } => (),
@@ -273,6 +283,16 @@ trait UiState {
     fn handle_yield(&mut self, yielded: String, reason: YieldReason) -> Option<StateInputResult>;
     /// Exit from this state, potentially providing some yield
     fn output_on_exit(&self) -> StateYield;
+    /// Gets called any time the global TaskListing is updated (an opportunity for a UI state to
+    /// update itself (e.g. scroll to bottom after appending a new Task))
+    fn on_tasklist_update(
+        &mut self,
+        _old: &TaskListing,
+        _new: &TaskListing,
+        _ui_rows: usize,
+        _ui_cols: usize,
+    ) -> () {
+    }
 }
 
 /// ListingState - initial state which displays available tasks and their completion statuses.
@@ -536,14 +556,13 @@ impl UiState for ListingState {
             _ => (),
         }
 
-        // handle scrolling
         // 3 lines taken up at top, 2 at bottom
         // TODO: handling when no tasks are in the list
         let max_tasks_visible: usize = (ui_rows - (3 + 2)) as usize;
         if self.task_index < self.scroll_pos {
             self.scroll_pos = self.task_index;
         } else if self.task_index.unwrap() > self.scroll_pos.unwrap() + max_tasks_visible {
-            self.scroll_pos = self.task_index;
+            self.scroll_pos = Some(self.task_index.unwrap() - max_tasks_visible + 1);
         } else if self.task_index.unwrap() - self.scroll_pos.unwrap() >= max_tasks_visible {
             self.scroll_pos = Some(self.task_index.unwrap() - max_tasks_visible + 1);
         }
@@ -572,6 +591,31 @@ impl UiState for ListingState {
     fn output_on_exit(&self) -> StateYield {
         // If the user exits the ListingState, they're done using the program
         StateYield::QuitProgram
+    }
+    fn on_tasklist_update(
+        &mut self,
+        old: &TaskListing,
+        new: &TaskListing,
+        ui_rows: usize,
+        _ui_cols: usize,
+    ) -> () {
+        // If the list got larger, we added a new task and should scroll to it
+        if old.total_tasks() < new.total_tasks() {
+            self.task_index = Some(new.total_tasks() - 1);
+            self.prev_index = self.task_index;
+        }
+
+        // Now we can calculate scroll position and the like
+        // 3 lines taken up at top, 2 at bottom
+        // TODO: handling when no tasks are in the list
+        let max_tasks_visible: usize = (ui_rows - (3 + 2)) as usize;
+        if self.task_index < self.scroll_pos {
+            self.scroll_pos = self.task_index;
+        } else if self.task_index.unwrap() > self.scroll_pos.unwrap() + max_tasks_visible {
+            self.scroll_pos = Some(self.task_index.unwrap() - max_tasks_visible + 1);
+        } else if self.task_index.unwrap() - self.scroll_pos.unwrap() >= max_tasks_visible {
+            self.scroll_pos = Some(self.task_index.unwrap() - max_tasks_visible + 1);
+        }
     }
 }
 

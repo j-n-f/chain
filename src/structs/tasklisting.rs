@@ -43,7 +43,7 @@ pub fn get_tasks_path() -> PathBuf {
 ///
 /// It also represents the user's prioritization of tasks (based on the order they appear in the
 /// vector)
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TaskListing {
     all_tasks: Vec<Task>,
 }

@@ -24,7 +24,7 @@ use std::fmt;
 ///
 /// 1. associated with a `Completion` (this can only be done when completing the task)
 /// 2. associated with the `Task` on some given day
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Remark {
     /// Timestamp for when remark was made
     datetime: DateTime<Utc>,
@@ -33,7 +33,7 @@ pub struct Remark {
 }
 
 /// Represents a `Task` being completed on a particular day.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Completion {
     /// Date and time at which this completion was recorded
     datetime: DateTime<Utc>,
@@ -45,7 +45,7 @@ pub struct Completion {
 
 /// Represents the state of a task at some point in time (i.e. the user can change the
 /// description).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskDetails {
     /// Timestamp of when these details described the Task
     revised: DateTime<Utc>,
@@ -111,7 +111,7 @@ impl Error for TaskError {
 
 /// Represents a task. It includes a history of revisions to task details, as well as a list of
 /// dates and times on which the task was completed.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Task {
     /// A record of revisions made to the TaskDetails for this Task
     detail_history: Vec<TaskDetails>,
