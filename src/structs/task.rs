@@ -178,16 +178,19 @@ impl Task {
 
     /// Returns true if completed on the given date
     pub fn completed_on(&self, date: Date<Local>) -> bool {
-        for completion in &self.completions {
-            let completion_date_utc: DateTime<Utc> = completion.datetime;
-            let completion_date_local: DateTime<Local> = completion_date_utc.with_timezone(&Local);
+        let completion_lookup = self.completions.binary_search_by_key(&date, |completion| {
+            let completion_dt_utc = completion.datetime;
+            let completion_dt_local = completion_dt_utc.with_timezone(&Local);
+            let completion_date_local = completion_dt_local.date();
 
-            if date == completion_date_local.date() {
-                return true;
-            }
+            completion_date_local
+        });
+
+        if let Ok(_completion_index) = completion_lookup {
+            true
+        } else {
+            false
         }
-
-        false
     }
 
     /// Optionally returns a `DateTime<Local>` for when this task was completed today (if it was),
@@ -196,18 +199,22 @@ impl Task {
     // return bool
     pub fn completed_today(&self) -> Option<DateTime<Local>> {
         let today: Date<Local> = Local::today();
-        for completion in &self.completions {
-            // Note to self: if you want to do timezone conversion with chrono, you have to convert
-            // as a DateTime first, then get the dates with .date()
+
+        let completion_lookup = self.completions.binary_search_by_key(&today, |completion| {
             let completion_dt_utc: DateTime<Utc> = completion.datetime;
             let completion_dt_local: DateTime<Local> = completion_dt_utc.with_timezone(&Local);
+            let completion_date_local = completion_dt_local.date();
 
-            if today == completion_dt_local.date() {
-                return Some(completion_dt_local);
-            }
+            completion_date_local
+        });
+
+        if let Ok(completion_index) = completion_lookup {
+            let utc_datetime = self.completions[completion_index].datetime;
+            let local_date = utc_datetime.with_timezone(&Local);
+            return Some(local_date);
+        } else {
+            return None;
         }
-
-        None
     }
 
     /// Add a remark to a completed task (note: this isn't associated with a `Completion`)
